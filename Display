@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Encounter Display</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.16.0/dist/mqtt.min.js"></script>
+<style>
+  :root {
+    --font: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+    --bg: #e9edf2;
+    --surface: #ffffff;
+    --raised: #eef1f5;
+    --line: #cdd4de;
+    --text: #141821;
+    --muted: #4f5868;
+    --faint: #7c8595;
+    --player: #1d6fd6;
+    --monster: #c8304a;
+    --warn: #d45f00;
+    --ok: #1a9d5a;
+
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #11141a;
+      --surface: #191d25;
+      --raised: #222833;
+      --line: #313947;
+      --text: #eef1f6;
+      --muted: #a6afbf;
+      --faint: #707b8e;
+      --player: #52abff;
+      --monster: #f2566e;
+      --warn: #ff8c24;
+      --ok: #2fcf7c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #11141a;
+    --surface: #191d25;
+    --raised: #222833;
+    --line: #313947;
+    --text: #eef1f6;
+    --muted: #a6afbf;
+    --faint: #707b8e;
+    --player: #52abff;
+    --monster: #f2566e;
+    --warn: #ff8c24;
+    --ok: #2fcf7c;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  [hidden] { display: none !important; }
+  html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    height: 100%;
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.4;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 3px solid var(--player); outline-offset: 2px; }
+
+  .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+
+  /* ---------- Top bar ---------- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 1.6vw;
+    padding: 1.4vh 2vw;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    font-size: clamp(0.95rem, 2vh, 1.3rem);
+  }
+  .topbar b { font-weight: 800; font-variant-numeric: tabular-nums; }
+  .enc { font-weight: 700; }
+  .rnd { color: var(--muted); }
+  .rnd b { color: var(--text); }
+  .spacer { flex: 1; }
+  .conn { display: flex; align-items: center; gap: 0.5em; color: var(--muted); font-weight: 600; font-size: 0.9em; }
+  .conn::before { content: ""; width: 0.65em; height: 0.65em; border-radius: 50%; background: var(--faint); }
+  .conn[data-state="live"]::before { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .conn[data-state="waiting"]::before, .conn[data-state="connecting"]::before, .conn[data-state="stale"]::before { background: var(--warn); }
+  .conn[data-state="error"]::before { background: var(--monster); }
+  .tb-btn {
+    padding: 0.35em 0.8em;
+    min-height: 40px;
+    font-size: 0.85em;
+    font-weight: 600;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .tb-btn:hover { color: var(--text); border-color: var(--muted); }
+  .tb-btn[aria-pressed="true"] { color: var(--text); background: var(--raised); }
+
+  /* ---------- Main view ---------- */
+  .view {
+    display: grid;
+    grid-template-columns: 1fr minmax(280px, 30%);
+    gap: 2vw;
+    padding: 2.4vh 2vw;
+    min-height: 0;
+  }
+
+  .stage {
+    --faction: var(--player);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 3vh 2.6vw;
+    background: var(--surface);
+    border: 6px solid var(--faction);
+    border-radius: 20px;
+    box-shadow: inset 0 0 90px color-mix(in srgb, var(--faction) 14%, transparent);
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .stage.is-monster { --faction: var(--monster); }
+  .stage.is-empty { --faction: var(--line); }
+
+  .stage-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.5rem; }
+  .who { min-width: 0; }
+  .tag { font-size: clamp(0.9rem, 2vh, 1.25rem); font-weight: 700; color: var(--faction); }
+  .bloodied-note { display: none; color: var(--monster); font-weight: 700; margin-left: 0.6em; }
+  .stage.is-monster.is-bloodied .bloodied-note { display: inline; }
+  .name {
+    font-size: clamp(1.8rem, min(8vh, 10vw), 6rem);
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .init { flex-shrink: 0; text-align: center; padding: 1vh 1.2vw; border-radius: 14px; background: var(--raised); border: 1px solid var(--line); }
+  .init-label { display: block; font-size: clamp(0.8rem, 1.7vh, 1.05rem); color: var(--muted); font-weight: 600; }
+  .init-value { display: block; font-size: clamp(2rem, 6vh, 4rem); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+
+  .clock { position: relative; isolation: isolate; flex: 1; display: flex; flex-direction: column; justify-content: center; min-height: 0; }
+  .clock-label { font-size: clamp(1rem, 2.3vh, 1.45rem); font-weight: 600; color: var(--muted); display: flex; gap: 0.8em; align-items: baseline; }
+  .state-pill { font-size: 0.85em; font-weight: 700; padding: 0.1em 0.7em; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .state-pill.running { color: var(--faction); border-color: var(--faction); }
+  .timer {
+    font-size: clamp(3.5rem, min(25vh, 30vw), 19rem);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    margin: 0.6vh 0 1.8vh;
+  }
+  .bar { height: 2.4vh; min-height: 12px; border-radius: 999px; background: var(--raised); border: 1px solid var(--line); overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--faction); transform-origin: left; }
+
+  .blood {
+    display: none;
+    position: absolute;
+    inset: -1vh -1.2vw;
+    z-index: -1;
+    pointer-events: none;
+    color: var(--monster);
+    opacity: 0.16;
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .blood svg { display: block; width: 100%; height: 100%; }
+  .stage.is-monster.is-bloodied .blood { display: block; }
+
+  .conds { margin-top: 2vh; display: flex; flex-direction: column; gap: 0.8vh; max-height: 26vh; overflow: hidden; }
+  .cond strong { font-size: clamp(1rem, 2.1vh, 1.35rem); }
+  .cond span { font-size: clamp(0.92rem, 1.9vh, 1.2rem); color: var(--muted); margin-left: 0.5em; }
+
+  .next {
+    margin-top: 2vh;
+    padding-top: 1.6vh;
+    border-top: 1px solid var(--line);
+    font-size: clamp(1.05rem, 2.4vh, 1.5rem);
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .next strong { color: var(--text); font-weight: 700; margin-left: 0.4em; }
+
+  /* Waiting state (before combat, or no data yet) */
+  .waiting { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 1.2vh; }
+  .waiting h1 { font-size: clamp(2rem, 7vh, 5rem); font-weight: 800; line-height: 1.05; letter-spacing: -0.015em; }
+  .waiting p { font-size: clamp(1rem, 2.4vh, 1.5rem); color: var(--muted); max-width: 40ch; }
+
+  /* Warnings */
+  .stage.warn-pulse { animation: edgePulse 1s linear infinite; }
+  .stage.warn-pulse .timer { animation: textPulse 1s linear infinite; }
+  .stage.warn-rapid { animation: edgeRapid 0.4s steps(1) infinite; }
+  .stage.warn-rapid .timer { animation: textRapid 0.4s steps(1) infinite; }
+  .stage.warn-solid, .stage.warn-static { --faction: var(--warn); }
+  .stage.warn-solid .timer, .stage.warn-static .timer { color: var(--warn); }
+  @keyframes edgePulse { 25%, 75% { border-color: var(--warn); } }
+  @keyframes textPulse { 25%, 75% { color: var(--warn); } }
+  @keyframes edgeRapid { 50% { border-color: var(--warn); } }
+  @keyframes textRapid { 50% { color: var(--warn); } }
+  @media (prefers-reduced-motion: reduce) {
+    .stage.warn-pulse, .stage.warn-rapid, .stage.warn-pulse .timer, .stage.warn-rapid .timer { animation: none; }
+    .stage.warn-rapid { --faction: var(--warn); }
+    .stage.warn-rapid .timer { color: var(--warn); }
+    .dodge-title { animation: none !important; }
+  }
+
+  /* ---------- Turn order ---------- */
+  .order {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 2.4vh 1.2vw 1.6vh;
+  }
+  .order h2 { font-size: clamp(1.1rem, 2.6vh, 1.6rem); font-weight: 700; padding: 0 0.6rem 1.2vh; }
+  .order-list { list-style: none; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 0.5vh; }
+  .o-item {
+    --faction: var(--player);
+    position: relative;
+    display: grid;
+    grid-template-columns: 2.4em 1fr;
+    gap: 0.8rem;
+    padding: 1.1vh 0.8rem;
+    border-radius: 10px;
+    font-size: clamp(1rem, 2.2vh, 1.4rem);
+  }
+  .o-item.is-monster { --faction: var(--monster); }
+  .o-item::before { content: ""; position: absolute; left: 0; top: 18%; bottom: 18%; width: 4px; border-radius: 4px; background: var(--faction); }
+  .o-item.active { background: var(--raised); }
+  .o-item.active::before { top: 8%; bottom: 8%; width: 5px; }
+  .o-init { font-weight: 800; text-align: right; color: var(--faction); font-variant-numeric: tabular-nums; }
+  .o-body { min-width: 0; }
+  .o-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .o-item.active .o-name { font-weight: 800; }
+  .o-meta { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.3vh; font-size: 0.8em; color: var(--muted); }
+  .o-bank { flex: 1; max-width: 8rem; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .o-bank span { display: block; height: 100%; background: var(--faction); transform-origin: left; }
+  .o-bank-num { font-variant-numeric: tabular-nums; min-width: 2.6em; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.5vh; }
+  .chip { font-size: 0.72em; font-weight: 600; padding: 0.1em 0.5em; border-radius: 999px; background: var(--raised); border: 1px solid var(--line); color: var(--muted); }
+  .o-item.active .chip { background: var(--surface); }
+  .chip.bloodied { color: var(--monster); border-color: var(--monster); }
+  .order-empty { color: var(--faint); padding: 1vh 0.6rem; font-size: clamp(0.95rem, 2vh, 1.2rem); }
+
+  /* ---------- Banners and overlays ---------- */
+  .banner {
+    position: fixed;
+    left: 50%;
+    top: calc(9vh + env(safe-area-inset-top, 0px));
+    transform: translateX(-50%);
+    z-index: 50;
+    padding: 0.7em 1.3em;
+    border-radius: 12px;
+    background: var(--warn);
+    color: #fff;
+    font-weight: 700;
+    font-size: clamp(0.95rem, 2vh, 1.2rem);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    width: max-content;
+    max-width: 92vw;
+    text-align: center;
+  }
+
+  .join {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: calc(4vh + env(safe-area-inset-top, 0px)) 5vw calc(4vh + env(safe-area-inset-bottom, 0px));
+    background: var(--bg);
+    overflow-y: auto;
+  }
+  .join-card {
+    width: min(520px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 4vh 2.4rem;
+  }
+  .join-card h1 { font-size: clamp(1.8rem, 4.6vh, 2.6rem); font-weight: 800; line-height: 1.1; letter-spacing: -0.015em; }
+  .join-card > p { color: var(--muted); margin: 1vh 0 3vh; font-size: clamp(1rem, 2vh, 1.15rem); }
+  .field { margin-bottom: 2vh; }
+  .field label { display: block; font-weight: 700; margin-bottom: 0.5vh; }
+  .help { display: block; font-size: 0.85em; color: var(--muted); margin-top: 0.5vh; }
+  .input, .select {
+    width: 100%;
+    min-height: 48px;
+    padding: 1.2vh 0.9rem;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    font-size: clamp(1rem, 2.1vh, 1.2rem);
+    outline: none;
+  }
+  .input:focus, .select:focus { border-color: var(--player); box-shadow: 0 0 0 3px color-mix(in srgb, var(--player) 25%, transparent); }
+  .room-input { font-size: clamp(1.6rem, 4.4vh, 2.4rem); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; text-align: center; }
+  details summary { cursor: pointer; color: var(--muted); font-weight: 600; margin-bottom: 1.4vh; }
+  .btn {
+    width: 100%;
+    min-height: 52px;
+    padding: 1.4vh 1.4em;
+    font-size: clamp(1.05rem, 2.3vh, 1.35rem);
+    font-weight: 700;
+    color: var(--bg);
+    background: var(--text);
+    border: 0;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  .join-error { color: var(--monster); font-weight: 600; margin-top: 1.4vh; min-height: 1.4em; }
+
+  .dodge {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 4vh 4vw;
+    background: var(--warn);
+    color: #fff;
+  }
+  .dodge-title { font-size: clamp(3.5rem, 16vh, 12rem); font-weight: 800; letter-spacing: -0.03em; line-height: 1; animation: punch 0.25s infinite alternate; }
+  .dodge-sub { font-size: clamp(1.2rem, 4vh, 2.4rem); font-weight: 600; margin-top: 2vh; opacity: 0.92; }
+  @keyframes punch { from { transform: scale(0.95); } to { transform: scale(1.05); } }
+
+  /* ---------- Narrow and portrait screens ---------- */
+  @media (max-width: 900px), (orientation: portrait) {
+    body { overflow: auto; }
+    .app { height: auto; min-height: 100%; }
+    .view { grid-template-columns: 1fr; }
+    .stage { min-height: 62vh; }
+    .topbar { flex-wrap: wrap; row-gap: 0.8vh; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="topbar">
+    <div class="enc">Encounter <b id="encNo">–</b></div>
+    <div class="rnd">Round <b id="roundNo">–</b></div>
+    <div class="spacer"></div>
+    <div id="conn" class="conn" data-state="connecting">Connecting</div>
+    <button id="soundBtn" class="tb-btn" aria-pressed="false" onclick="toggleSound()">Sound off</button>
+    <button id="fsBtn" class="tb-btn" onclick="toggleFullscreen()">Full screen</button>
+    <button id="roomBtn" class="tb-btn" onclick="showJoin(true)">Room</button>
+  </header>
+
+  <main class="view">
+    <section id="stage" class="stage is-empty" aria-live="polite">
+      <div id="waiting" class="waiting">
+        <h1 id="waitTitle">Connecting…</h1>
+        <p id="waitText">Looking for the tracker.</p>
+      </div>
+
+      <div id="live" hidden style="display:flex;flex-direction:column;flex:1;min-height:0">
+        <div class="stage-head">
+          <div class="who">
+            <span id="tag" class="tag">Player</span><span class="bloodied-note">Bloodied</span>
+            <div id="name" class="name"></div>
+          </div>
+          <div class="init">
+            <span class="init-label">Initiative</span>
+            <span id="initVal" class="init-value">–</span>
+          </div>
+        </div>
+
+        <div class="clock">
+          <div class="blood" aria-hidden="true">
+            <svg viewBox="0 0 1200 400" preserveAspectRatio="none" fill="currentColor">
+              <path d="M0,0 L1200,0 L1200,120 C1150,135 1120,60 1070,150 C1030,230 1000,110 960,210 C925,300 890,140 850,120 C800,100 770,260 720,280 C670,300 640,90 590,160 C550,220 520,340 470,340 C420,340 395,120 345,190 C305,245 275,110 235,130 C185,155 150,300 100,250 C60,210 35,100 0,120 Z"/>
+              <circle cx="100" cy="310" r="18"/><circle cx="470" cy="385" r="14"/><circle cx="720" cy="330" r="12"/><circle cx="960" cy="265" r="15"/>
+            </svg>
+          </div>
+          <div class="clock-label"><span id="clockLabel">Time bank</span><span id="statePill" class="state-pill">Paused</span></div>
+          <div id="timer" class="timer">0:00</div>
+          <div class="bar"><div id="barFill" class="bar-fill"></div></div>
+          <div id="conds" class="conds"></div>
+        </div>
+
+        <div class="next">Up next<strong id="nextName">–</strong></div>
+      </div>
+    </section>
+
+    <aside class="order" aria-label="Turn order">
+      <h2>Turn order</h2>
+      <ol id="orderList" class="order-list"></ol>
+    </aside>
+  </main>
+</div>
+
+<div id="banner" class="banner" hidden></div>
+
+<div id="dodge" class="dodge" role="alert" hidden>
+  <div class="dodge-title">Nice dodge!</div>
+  <div class="dodge-sub">Time ran out. Passing to the next turn.</div>
+</div>
+
+<div id="join" class="join" hidden>
+  <div class="join-card">
+    <h1>Watch an encounter</h1>
+    <p>Enter the room code shown on the tracker under Live display.</p>
+    <div class="field">
+      <label for="roomInput">Room code</label>
+      <input id="roomInput" class="input room-input" type="text" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC123">
+    </div>
+    <details>
+      <summary>Relay server</summary>
+      <div class="field">
+        <select id="relaySelect" class="select">
+          <option value="hivemq">HiveMQ public relay</option>
+          <option value="emqx">EMQX public relay</option>
+          <option value="custom">Custom address…</option>
+        </select>
+        <span class="help">Match what the tracker uses. Links from the tracker set this for you.</span>
+      </div>
+      <div id="relayCustomWrap" class="field" hidden>
+        <input id="relayCustom" class="input" type="text" placeholder="wss://example.com:8884/mqtt" spellcheck="false">
+      </div>
+    </details>
+    <button class="btn" onclick="submitJoin()">Watch</button>
+    <div id="joinError" class="join-error" role="alert"></div>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const RELAYS = {
+    hivemq: 'wss://broker.hivemq.com:8884/mqtt',
+    emqx: 'wss://broker.emqx.io:8084/mqtt'
+  };
+  const SAVE_KEY = 'encounterTracker.display.v1';
+
+  let room = null;
+  let relay = 'hivemq';
+  let client = null;
+  let viewerId = 'et-view-' + Math.random().toString(36).slice(2, 10);
+
+  let state = null;           // last state received from the control page
+  let receivedAt = 0;         // performance.now() when it arrived
+  let controlOnline = null;   // true, false, or null (unknown)
+  let connState = 'connecting';
+  let soundOn = false;
+  let audioCtx = null;
+  let lastTimeout = false;
+
+  // ---------- Formatting ----------
+  const pad = (n) => String(n).padStart(2, '0');
+  function fmt(sec) {
+    const s = Math.max(0, Math.ceil(sec));
+    return Math.floor(s / 60) + ':' + pad(s % 60);
+  }
+  const fmtInit = (v) => (v === null || v === undefined) ? '–' : v;
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  const conditionRules = {
+    Blinded: "Attacks against you have advantage. Your attacks have disadvantage. You fail checks that need sight.",
+    Charmed: "You can't attack or target the charmer with harmful effects. The charmer has advantage on social checks with you.",
+    Deafened: "You automatically fail checks that need hearing.",
+    Frightened: "Disadvantage on ability checks and attack rolls while the source is in sight. You can't move closer to it.",
+    Grappled: "Your speed is 0. Ends if the grappler is incapacitated or you're moved out of reach.",
+    Incapacitated: "You can't take actions or reactions.",
+    Invisible: "You're heavily obscured. Attacks against you have disadvantage. Your attacks have advantage.",
+    Paralyzed: "Incapacitated and speed 0. You fail Str and Dex saves. Hits from within 5 ft are critical hits.",
+    Petrified: "Turned to stone. Speed 0 and incapacitated. Resistance to all damage. Immune to poison.",
+    Poisoned: "Disadvantage on attack rolls and ability checks.",
+    Prone: "You can only crawl. Disadvantage on your attacks. Melee attacks against you have advantage.",
+    Restrained: "Speed 0. Your attacks have disadvantage and attacks against you have advantage. Disadvantage on Dex saves.",
+    Stunned: "Incapacitated. You fail Str and Dex saves. Attacks against you have advantage.",
+    Unconscious: "Incapacitated, drop what you hold, and fall prone. You fail Str and Dex saves. Hits from within 5 ft are critical hits.",
+    Exhaustion: "Penalties stack by level: disadvantage on checks and saves, reduced speed and max HP, and death at the highest level."
+  };
+
+  // ---------- Connection ----------
+  function relayUrl() { return RELAYS[relay] || relay; }
+  function base() { return `encounter-tracker-live/v1/${room}`; }
+
+  function setConn(s, text) {
+    connState = s;
+    const c = $('conn');
+    c.dataset.state = s;
+    c.textContent = text;
+  }
+
+  function connect() {
+    disconnect();
+    state = null;
+    controlOnline = null;
+    render();
+    $('roomBtn').textContent = `Room ${room}`;
+    if (typeof mqtt === 'undefined') {
+      setConn('error', 'Sync library didn\u2019t load');
+      showWaiting('Can\u2019t connect', 'The sync library failed to load. Check the internet connection and reload the page.');
+      return;
+    }
+    setConn('connecting', 'Connecting');
+    showWaiting('Connecting…', `Joining room ${room}.`);
+    const presence = `${base()}/viewers/${viewerId}`;
+    client = mqtt.connect(relayUrl(), {
+      clientId: viewerId,
+      clean: true,
+      keepalive: 30,
+      reconnectPeriod: 3000,
+      connectTimeout: 10000,
+      will: { topic: presence, payload: '', qos: 0, retain: true }
+    });
+    client.on('connect', () => {
+      client.subscribe([`${base()}/state`, `${base()}/status`]);
+      client.publish(presence, '1', { qos: 0, retain: true });
+      setConn('waiting', 'Connected');
+      if (!state) showWaiting('Waiting for the tracker', `Connected to room ${room}. The display fills in when the tracker goes live.`);
+    });
+    client.on('reconnect', () => setConn('connecting', 'Reconnecting'));
+    client.on('offline', () => setConn('error', 'Offline, retrying'));
+    client.on('error', () => setConn('error', 'Connection problem'));
+    client.on('message', onMessage);
+  }
+
+  function disconnect() {
+    if (!client) return;
+    try { client.publish(`${base()}/viewers/${viewerId}`, '', { qos: 0, retain: true }); } catch (e) { /* ignore */ }
+    client.end(false);
+    client = null;
+  }
+
+  function onMessage(topic, payload) {
+    const text = payload ? payload.toString() : '';
+    if (topic.endsWith('/status')) {
+      controlOnline = text === 'online' ? true : text === 'offline' ? false : null;
+      render();
+      return;
+    }
+    if (!text) {
+      state = null;
+      showWaiting('The tracker stopped sharing', `Room ${room} is closed. This screen reconnects when the tracker goes live again.`);
+      render();
+      return;
+    }
+    let obj;
+    try { obj = JSON.parse(text); } catch (e) { return; }
+    if (!obj || obj.v !== 1 || !Array.isArray(obj.roster)) return;
+
+    const timeoutNow = !!obj.timeout;
+    if (timeoutNow && !lastTimeout && state) playBuzzer();
+    lastTimeout = timeoutNow;
+
+    state = obj;
+    receivedAt = performance.now();
+    render();
+  }
+
+  // ---------- Rendering ----------
+  function showWaiting(title, text) {
+    $('waitTitle').textContent = title;
+    $('waitText').textContent = text;
+  }
+
+  function activeCombatant() {
+    if (!state || !state.combatStarted || state.activeId == null) return null;
+    return state.roster.find(c => c.id === state.activeId) || null;
+  }
+
+  function clockIsRunning() {
+    return !!state && state.combatStarted && !state.paused && !state.timeout && controlOnline !== false;
+  }
+
+  function liveBank(c) {
+    if (!c) return 0;
+    if (state.activeId === c.id && clockIsRunning()) {
+      return Math.max(0, c.bank - (performance.now() - receivedAt) / 1000);
+    }
+    return c.bank;
+  }
+
+  function maxFor(c) { return c.faction === 'player' ? state.tuning.maxCap : state.tuning.monsterStatic; }
+
+  function render() {
+    const hasState = !!state;
+    const active = activeCombatant();
+
+    $('encNo').textContent = hasState ? state.encounter : '–';
+    $('roundNo').textContent = hasState && state.combatStarted ? state.round : '–';
+
+    if (hasState) {
+      if (controlOnline === false) setConn('stale', 'Tracker offline');
+      else setConn('live', 'Live');
+    }
+    const banner = $('banner');
+    if (hasState && controlOnline === false) {
+      banner.textContent = 'The tracker is offline. Showing its last update.';
+      banner.hidden = false;
+    } else {
+      banner.hidden = true;
+    }
+
+    $('dodge').hidden = !(hasState && state.timeout);
+
+    // Stage
+    const stage = $('stage');
+    if (!active) {
+      stage.className = 'stage is-empty';
+      $('live').hidden = true;
+      $('waiting').hidden = false;
+      if (hasState && !state.combatStarted) {
+        const missing = state.roster.filter(c => c.init == null).length;
+        showWaiting(`Encounter ${state.encounter} is being set up`,
+          state.roster.length === 0 ? 'Combatants appear here as they join.'
+          : missing ? `Waiting on ${missing} initiative ${missing === 1 ? 'roll' : 'rolls'}.`
+          : 'Everyone has rolled. Combat starts soon.');
+      }
+    } else {
+      $('waiting').hidden = true;
+      $('live').hidden = false;
+      const isPlayer = active.faction === 'player';
+      stage.className = 'stage ' + (isPlayer ? 'is-player' : 'is-monster') + (!isPlayer && active.bloodied ? ' is-bloodied' : '');
+      $('tag').textContent = isPlayer ? 'Player' : 'Monster';
+      $('name').textContent = active.name;
+      $('name').title = active.name;
+      $('initVal').textContent = fmtInit(active.init);
+      $('clockLabel').textContent = isPlayer ? 'Time bank' : 'Monster turn clock';
+
+      const conds = $('conds');
+      conds.replaceChildren();
+      active.conditions.forEach(name => {
+        const row = el('div', 'cond');
+        row.appendChild(el('strong', null, name));
+        row.appendChild(el('span', null, conditionRules[name] || ''));
+        conds.appendChild(row);
+      });
+
+      const idx = state.roster.findIndex(c => c.id === active.id);
+      $('nextName').textContent = state.roster.length > 1 ? state.roster[(idx + 1) % state.roster.length].name : '–';
+    }
+
+    // Turn order
+    const list = $('orderList');
+    list.replaceChildren();
+    if (!hasState || state.roster.length === 0) {
+      list.appendChild(el('li', 'order-empty', hasState ? 'No combatants yet.' : 'Waiting for the tracker.'));
+    } else {
+      state.roster.forEach(c => {
+        const isActive = active && c.id === active.id;
+        const li = el('li', `o-item ${c.faction === 'player' ? 'is-player' : 'is-monster'}${isActive ? ' active' : ''}`);
+        li.appendChild(el('span', 'o-init', fmtInit(c.init)));
+        const body = el('div', 'o-body');
+        body.appendChild(el('div', 'o-name', c.name));
+        const meta = el('div', 'o-meta');
+        if (c.faction === 'player') {
+          const bar = el('div', 'o-bank');
+          bar.dataset.id = c.id;
+          const fill = el('span');
+          bar.appendChild(fill);
+          meta.appendChild(bar);
+          const num = el('span', 'o-bank-num');
+          num.dataset.id = c.id;
+          meta.appendChild(num);
+        } else {
+          meta.appendChild(el('span', null, 'Monster'));
+        }
+        body.appendChild(meta);
+        if ((c.bloodied && c.faction === 'monster') || c.conditions.length) {
+          const chips = el('div', 'chips');
+          if (c.bloodied && c.faction === 'monster') chips.appendChild(el('span', 'chip bloodied', 'Bloodied'));
+          c.conditions.forEach(n => chips.appendChild(el('span', 'chip', n)));
+          body.appendChild(chips);
+        }
+        li.appendChild(body);
+        list.appendChild(li);
+      });
+    }
+    tick(true);
+  }
+
+  // Timer and bars update every frame between messages
+  function tick(once) {
+    if (state) {
+      const active = activeCombatant();
+      if (active) {
+        const bank = liveBank(active);
+        const pct = Math.max(0, Math.min(1, bank / maxFor(active)));
+        $('timer').textContent = fmt(bank);
+        $('barFill').style.transform = `scaleX(${pct})`;
+
+        const running = clockIsRunning();
+        const pill = $('statePill');
+        pill.textContent = running ? 'Running' : 'Paused';
+        pill.classList.toggle('running', running);
+
+        const stage = $('stage');
+        stage.classList.remove('warn-pulse', 'warn-rapid', 'warn-solid', 'warn-static');
+        if (active.faction === 'player') {
+          if (!running) { if (bank <= 10) stage.classList.add('warn-static'); }
+          else if (bank <= 5) stage.classList.add('warn-solid');
+          else if (bank <= 10) stage.classList.add('warn-rapid');
+          else if (bank <= 30 && bank >= 28) stage.classList.add('warn-pulse');
+        }
+      }
+      state.roster.forEach(c => {
+        if (c.faction !== 'player') return;
+        const bank = liveBank(c);
+        const bar = document.querySelector(`.o-bank[data-id="${c.id}"] span`);
+        const num = document.querySelector(`.o-bank-num[data-id="${c.id}"]`);
+        if (bar) bar.style.transform = `scaleX(${Math.max(0, Math.min(1, bank / state.tuning.maxCap))})`;
+        if (num) num.textContent = fmt(bank);
+      });
+    }
+    if (once !== true) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  // ---------- Sound, screen and full screen ----------
+  function toggleSound() {
+    soundOn = !soundOn;
+    if (soundOn && !audioCtx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    $('soundBtn').textContent = soundOn ? 'Sound on' : 'Sound off';
+    $('soundBtn').setAttribute('aria-pressed', soundOn);
+  }
+
+  function playBuzzer() {
+    if (!soundOn || !audioCtx) return;
+    try {
+      const ctx = audioCtx;
+      const t = ctx.currentTime;
+      const o1 = ctx.createOscillator(), g1 = ctx.createGain();
+      o1.type = 'sawtooth';
+      o1.frequency.setValueAtTime(100, t);
+      o1.frequency.linearRampToValueAtTime(65, t + 0.55);
+      g1.gain.setValueAtTime(0.3, t);
+      g1.gain.linearRampToValueAtTime(0.01, t + 0.55);
+      o1.connect(g1); g1.connect(ctx.destination);
+      const o2 = ctx.createOscillator(), g2 = ctx.createGain();
+      o2.type = 'triangle';
+      o2.frequency.setValueAtTime(523.25, t + 0.08);
+      o2.frequency.setValueAtTime(783.99, t + 0.22);
+      g2.gain.setValueAtTime(0, t);
+      g2.gain.setValueAtTime(0.22, t + 0.08);
+      g2.gain.linearRampToValueAtTime(0.01, t + 0.45);
+      o2.connect(g2); g2.connect(ctx.destination);
+      o1.start(); o2.start();
+      o1.stop(t + 0.6); o2.stop(t + 0.6);
+    } catch (e) { /* ignore */ }
+  }
+
+  // Keep the screen awake where supported (needs one tap first on most devices)
+  let wakeLock = null;
+  async function requestWake() {
+    try {
+      if ('wakeLock' in navigator && !wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+    } catch (e) { /* not allowed or unsupported */ }
+  }
+  document.addEventListener('pointerdown', requestWake);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') requestWake(); });
+
+  function toggleFullscreen() {
+    const d = document;
+    if (d.fullscreenElement || d.webkitFullscreenElement) {
+      (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+    } else {
+      const e = d.documentElement;
+      const fn = e.requestFullscreen || e.webkitRequestFullscreen;
+      if (fn) fn.call(e);
+    }
+  }
+  if (!(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen)) $('fsBtn').hidden = true;
+
+  // ---------- Joining a room ----------
+  function showJoin(fromButton) {
+    $('roomInput').value = room || '';
+    const preset = !!RELAYS[relay];
+    $('relaySelect').value = preset ? relay : 'custom';
+    $('relayCustomWrap').hidden = preset;
+    if (!preset) $('relayCustom').value = relay;
+    $('joinError').textContent = '';
+    $('join').hidden = false;
+    $('roomInput').focus();
+    if (fromButton) $('roomInput').select();
+  }
+
+  function submitJoin() {
+    const code = $('roomInput').value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (code.length < 4) { $('joinError').textContent = 'Room codes are at least 4 letters or numbers.'; return; }
+    let r = $('relaySelect').value;
+    if (r === 'custom') {
+      r = $('relayCustom').value.trim();
+      if (!/^wss?:\/\//i.test(r)) { $('joinError').textContent = 'Custom relay addresses start with wss://'; return; }
+    }
+    room = code;
+    relay = r;
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ room, relay })); } catch (e) { /* ignore */ }
+    const u = new URL(location.href);
+    u.searchParams.set('room', room);
+    if (relay === 'hivemq') u.searchParams.delete('relay'); else u.searchParams.set('relay', relay);
+    history.replaceState(null, '', u);
+    $('join').hidden = true;
+    connect();
+  }
+
+  $('roomInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitJoin(); });
+  $('relaySelect').addEventListener('change', (e) => { $('relayCustomWrap').hidden = e.target.value !== 'custom'; });
+  window.addEventListener('pagehide', disconnect);
+
+  (function init() {
+    const params = new URLSearchParams(location.search);
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) { /* ignore */ }
+    room = (params.get('room') || (saved && saved.room) || '').toUpperCase().replace(/[^A-Z0-9]/g, '') || null;
+    relay = params.get('relay') || (params.get('room') ? 'hivemq' : (saved && saved.relay)) || 'hivemq';
+    if (room) {
+      try { localStorage.setItem(SAVE_KEY, JSON.stringify({ room, relay })); } catch (e) { /* ignore */ }
+      connect();
+    } else {
+      showWaiting('No room yet', 'Enter the room code from the tracker.');
+      setConn('waiting', 'Not connected');
+      showJoin(false);
+    }
+  })();
+</script>
+</body>
+</html>
