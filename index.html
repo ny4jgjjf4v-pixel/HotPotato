@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Encounter Tracker (initiative pad)</title>
+<title>Encounter Tracker</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -91,12 +91,57 @@
   }
   .queue-head {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: baseline;
     gap: 1rem;
     padding: 2.4vh 1.4rem 1.6vh;
     border-bottom: 1px solid var(--line);
   }
+  .live-badge {
+    flex-basis: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.55em;
+    margin-top: 0.6vh;
+    padding: 0.45em 0.7em;
+    font: inherit;
+    font-size: clamp(0.82rem, 1.6vh, 0.98rem);
+    font-weight: 600;
+    color: var(--muted);
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .live-badge:hover { border-color: var(--muted); }
+  .live-dot { width: 0.65em; height: 0.65em; border-radius: 50%; background: var(--faint); flex-shrink: 0; }
+  [data-state="live"] .live-dot, .live-status[data-state="live"]::before { background: #22b86a; box-shadow: 0 0 0 3px color-mix(in srgb, #22b86a 25%, transparent); }
+  [data-state="connecting"] .live-dot, [data-state="offline"] .live-dot,
+  .live-status[data-state="connecting"]::before, .live-status[data-state="offline"]::before { background: var(--warn); }
+  [data-state="error"] .live-dot, [data-state="nolib"] .live-dot,
+  .live-status[data-state="error"]::before, .live-status[data-state="nolib"]::before { background: var(--monster); }
+  .live-badge[data-state="live"] { color: var(--text); }
+  .live-status { display: flex; align-items: center; gap: 0.55em; font-weight: 600; color: var(--muted); }
+  .live-status::before { content: ""; width: 0.65em; height: 0.65em; border-radius: 50%; background: var(--faint); flex-shrink: 0; }
+
+  .live-card { width: min(760px, 100%); }
+  .live-share { display: grid; grid-template-columns: minmax(160px, 240px) 1fr; gap: 1.6rem; align-items: center; margin-top: 2.2vh; }
+  .live-qr { background: #fff; border-radius: 12px; padding: 8px; aspect-ratio: 1; }
+  .live-qr svg { display: block; width: 100%; height: 100%; }
+  .live-room-label { font-size: clamp(0.85rem, 1.7vh, 1rem); color: var(--muted); font-weight: 600; }
+  .live-room { font-size: clamp(2.2rem, 6vh, 3.4rem); font-weight: 800; letter-spacing: 0.08em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .live-link { display: block; margin: 1vh 0 1.4vh; font-size: clamp(0.85rem, 1.7vh, 1rem); color: var(--player); word-break: break-all; -webkit-user-select: text; user-select: text; }
+  .live-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8rem; }
+  .live-advanced { margin-top: 2.4vh; padding-top: 2vh; border-top: 1px solid var(--line); display: grid; grid-template-columns: 1fr 1fr; gap: 1.4vh 1.2rem; }
+  .live-advanced .field { min-width: 0; }
+  .live-note { grid-column: 1 / -1; font-size: clamp(0.8rem, 1.6vh, 0.95rem); color: var(--muted); }
+  @media (max-width: 700px) {
+    .live-share, .live-advanced { grid-template-columns: 1fr; }
+    .live-qr { max-width: 240px; }
+  }
+
   .queue-title { font-size: clamp(1.1rem, 2.4vh, 1.5rem); font-weight: 700; }
   .round { font-size: clamp(0.95rem, 1.9vh, 1.2rem); color: var(--muted); }
   .round strong { color: var(--text); font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -270,7 +315,7 @@
   .clock { flex: 1; display: flex; flex-direction: column; justify-content: center; min-height: 0; }
   .clock-label { font-size: clamp(1rem, 2.1vh, 1.3rem); font-weight: 600; color: var(--muted); }
   .timer {
-    font-size: clamp(5rem, 21vh, 15rem);
+    font-size: clamp(3.5rem, min(21vh, 26vw), 15rem);
     font-weight: 800;
     line-height: 1;
     letter-spacing: -0.03em;
@@ -682,6 +727,8 @@
     .cond-grid { grid-template-columns: repeat(2, 1fr); }
   }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.16.0/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js"></script>
 </head>
 <body>
 
@@ -691,6 +738,9 @@
     <header class="queue-head">
       <div id="queueTitle" class="queue-title">Encounter 1</div>
       <div class="round">Round <strong id="roundNum">1</strong></div>
+      <button id="liveBadge" class="live-badge" data-state="off" onclick="openLiveModal()">
+        <span class="live-dot"></span><span id="liveBadgeText">Live display off</span>
+      </button>
     </header>
     <ol id="queueList" class="queue-list"></ol>
     <footer class="keys">
@@ -837,6 +887,14 @@
 
     <div class="panel">
       <div class="panel-head">
+        <h2>Live display</h2>
+        <button class="btn btn-quiet" onclick="openLiveModal()">Set up</button>
+      </div>
+      <p id="liveSetupStatus" class="live-status" data-state="off">Off</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
         <h2>Session log</h2>
         <span id="logCount" class="count"></span>
       </div>
@@ -876,6 +934,53 @@
       <button id="padSet" class="btn btn-primary btn-big" onclick="commitInitPad()">Set initiative</button>
     </div>
     <p class="pad-keys">Number keys or numpad to type. <kbd>Enter</kbd> sets, <kbd>Backspace</kbd> deletes, <kbd>Esc</kbd> closes.</p>
+  </div>
+</div>
+
+<!-- Live display -->
+<div id="liveModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="liveTitle">
+  <div class="modal-card live-card">
+    <div class="modal-head">
+      <h2 id="liveTitle">Live display</h2>
+      <p id="liveModalStatus" class="live-status" data-state="off">Off</p>
+    </div>
+    <p class="panel-text">Mirror the turn order and timer on a TV, tablet or phone. Open the display page on that screen and scan the code, or type the room code in.</p>
+
+    <div id="liveShare" class="live-share" hidden>
+      <div id="liveQr" class="live-qr" aria-label="QR code for the display page"></div>
+      <div>
+        <div class="live-room-label">Room code</div>
+        <div id="liveRoom" class="live-room"></div>
+        <a id="liveLink" class="live-link" target="_blank" rel="noopener"></a>
+        <div class="live-row">
+          <button class="btn" onclick="copyDisplayLink()">Copy link</button>
+          <button id="newRoomBtn" class="btn btn-quiet">New room code</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="live-advanced">
+      <div class="field">
+        <label for="relaySelect">Relay server</label>
+        <select id="relaySelect" class="select">
+          <option value="hivemq">HiveMQ public relay</option>
+          <option value="emqx">EMQX public relay</option>
+          <option value="custom">Custom address…</option>
+        </select>
+        <span class="help">If screens won't connect, switch relays. Every screen follows the link's relay.</span>
+      </div>
+      <div id="relayCustomWrap" class="field" hidden>
+        <label for="relayCustom">Custom relay address</label>
+        <input id="relayCustom" class="input" type="text" placeholder="wss://example.com:8884/mqtt" spellcheck="false">
+        <span class="help">An MQTT server that accepts secure WebSocket connections.</span>
+      </div>
+      <p class="live-note">The relays are free public servers. Anyone who has the room code can watch, so keep private details out of names. The tracker keeps running normally if the relay drops.</p>
+    </div>
+
+    <div class="modal-foot" style="gap:0.8rem">
+      <button id="liveToggle" class="btn btn-primary btn-big" onclick="setLiveEnabled(!live.enabled)">Go live</button>
+      <button class="btn" onclick="closeLiveModal()">Done</button>
+    </div>
   </div>
 </div>
 
@@ -1131,6 +1236,7 @@
     const modalOpen = $('conditionsModal').classList.contains('open');
 
     if ($('initModal').classList.contains('open')) { handlePadKey(e); return; }
+    if ($('liveModal').classList.contains('open')) { if (e.key === 'Escape') closeLiveModal(); return; }
 
     if (e.key === 'Escape') {
       if (modalOpen) { closeConditionsModal(); return; }
@@ -1276,6 +1382,7 @@
   const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>';
 
   function rebuildRosterListsDOM() {
+    schedulePublish();
     const q = $('queueList');
     const s = $('rosterList');
     q.replaceChildren();
@@ -1597,6 +1704,7 @@
     $('pauseBtn').textContent = p ? 'Resume' : 'Pause';
     $('statusPill').textContent = p ? 'Paused' : 'Running';
     processMetricsRendering();
+    schedulePublish();
   }
 
   function togglePauseState() {
@@ -1616,6 +1724,7 @@
       logEvent('time_adjusted', Object.assign(snap(active), { amount, clockSeconds: r1(active.timeBank) }));
     }
     processMetricsRendering();
+    schedulePublish();
   }
 
   function toggleBloodiedState() {
@@ -1631,6 +1740,7 @@
   function cancelDodge() {
     if (dodgeTimeoutId) { clearTimeout(dodgeTimeoutId); dodgeTimeoutId = null; }
     $('dodgeOverlay').classList.remove('open');
+    schedulePublish();
   }
 
   function nextTurn(reason) {
@@ -1671,6 +1781,7 @@
   function executeDodgeSequence() {
     fireBuzzerAudioContext();
     $('dodgeOverlay').classList.add('open');
+    schedulePublish();
     if (dodgeTimeoutId) clearTimeout(dodgeTimeoutId);
     dodgeTimeoutId = setTimeout(() => {
       dodgeTimeoutId = null;
@@ -1864,6 +1975,258 @@
 
   armable($('newEncBtn'), 'Tap again: clear monsters and rolls', startNewEncounter);
   armable($('clearLogBtn'), 'Tap again to clear the log', startNewLog);
+
+  // ---------- Live display sync ----------
+  // Sends the tracker state through a public MQTT relay so display.html can mirror it on other screens.
+  var RELAYS = {
+    hivemq: { label: 'HiveMQ public relay', url: 'wss://broker.hivemq.com:8884/mqtt' },
+    emqx: { label: 'EMQX public relay', url: 'wss://broker.emqx.io:8084/mqtt' }
+  };
+  var LIVE_KEY = 'encounterTracker.live.v1';
+  var ROOM_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  var live = { enabled: false, room: null, relay: 'hivemq', client: null, status: 'off', viewers: new Set(), seq: 0, pending: null };
+
+  function randomRoom() {
+    const a = new Uint32Array(6);
+    crypto.getRandomValues(a);
+    return Array.from(a, n => ROOM_ALPHABET[n % ROOM_ALPHABET.length]).join('');
+  }
+  function liveBase() { return `encounter-tracker-live/v1/${live.room}`; }
+  function relayUrl() { return RELAYS[live.relay] ? RELAYS[live.relay].url : live.relay; }
+  function saveLivePrefs() {
+    try { localStorage.setItem(LIVE_KEY, JSON.stringify({ enabled: live.enabled, room: live.room, relay: live.relay })); } catch (e) { /* ignore */ }
+  }
+  function displayLink() {
+    const u = new URL('display.html', location.href);
+    u.search = '';
+    u.hash = '';
+    u.searchParams.set('room', live.room);
+    if (live.relay !== 'hivemq') u.searchParams.set('relay', live.relay);
+    return u.toString();
+  }
+
+  function buildLiveState() {
+    const active = roster[currentIndex];
+    return {
+      v: 1,
+      seq: ++live.seq,
+      encounter: encounterNo,
+      round,
+      combatStarted,
+      paused: isPaused,
+      timeout: $('dodgeOverlay').classList.contains('open'),
+      tuning: Object.assign({}, tuning),
+      activeId: combatStarted && active ? active.id : null,
+      roster: roster.map(c => ({
+        id: c.id, name: c.name, faction: c.faction, init: c.init,
+        bank: Math.round(c.timeBank * 100) / 100,
+        conditions: c.conditions.slice(), bloodied: c.bloodied
+      }))
+    };
+  }
+
+  function publishStateNow() {
+    if (!live.client || !live.client.connected) return;
+    live.client.publish(`${liveBase()}/state`, JSON.stringify(buildLiveState()), { qos: 0, retain: true });
+  }
+  function schedulePublish() {
+    if (!live || !live.enabled || live.pending) return;
+    live.pending = setTimeout(() => { live.pending = null; publishStateNow(); }, 120);
+  }
+  // While the clock runs, send a heartbeat so late joiners and drifting screens stay within a second.
+  setInterval(() => { if (live.enabled && combatStarted && !isPaused) publishStateNow(); }, 1000);
+
+  function setLiveStatus(status) {
+    live.status = status;
+    if (status !== 'live') live.viewers.clear();
+    updateLiveUI();
+  }
+
+  function liveConnect() {
+    liveDisconnect(false);
+    if (typeof mqtt === 'undefined') { setLiveStatus('nolib'); return; }
+    setLiveStatus('connecting');
+    const statusTopic = `${liveBase()}/status`;
+    let client;
+    try {
+      client = mqtt.connect(relayUrl(), {
+        clientId: 'et-ctl-' + randomRoom().toLowerCase() + Date.now().toString(36),
+        clean: true,
+        keepalive: 30,
+        reconnectPeriod: 3000,
+        connectTimeout: 10000,
+        will: { topic: statusTopic, payload: 'offline', qos: 0, retain: true }
+      });
+    } catch (e) {
+      setLiveStatus('error');
+      return;
+    }
+    live.client = client;
+    client.on('connect', () => {
+      client.publish(statusTopic, 'online', { qos: 0, retain: true });
+      client.subscribe(`${liveBase()}/viewers/+`);
+      live.viewers.clear();
+      setLiveStatus('live');
+      publishStateNow();
+    });
+    client.on('reconnect', () => setLiveStatus('connecting'));
+    client.on('offline', () => setLiveStatus('offline'));
+    client.on('error', () => setLiveStatus('error'));
+    client.on('message', (topic, payload) => {
+      const id = topic.split('/').pop();
+      if (payload && payload.length) live.viewers.add(id);
+      else live.viewers.delete(id);
+      updateLiveUI();
+    });
+  }
+
+  function liveDisconnect(announce) {
+    const c = live.client;
+    live.client = null;
+    if (!c) return;
+    if (announce && c.connected) {
+      c.publish(`${liveBase()}/status`, 'offline', { qos: 0, retain: true });
+      c.publish(`${liveBase()}/state`, '', { qos: 0, retain: true });  // clear the retained state
+    }
+    c.end(false);
+  }
+
+  function setLiveEnabled(on) {
+    live.enabled = on;
+    saveLivePrefs();
+    if (on) liveConnect();
+    else { liveDisconnect(true); setLiveStatus('off'); }
+    logEvent(on ? 'live_display_on' : 'live_display_off', { room: live.room });
+  }
+
+  function changeRelay(value) {
+    live.relay = value;
+    saveLivePrefs();
+    $('relayCustomWrap').hidden = !!RELAYS[value];
+    if (live.enabled && RELAYS[value]) liveConnect();
+    updateLiveUI();
+  }
+
+  function newRoomCode() {
+    const wasOn = live.enabled;
+    if (wasOn) liveDisconnect(true);
+    live.room = randomRoom();
+    saveLivePrefs();
+    if (wasOn) liveConnect();
+    updateLiveUI();
+    toast(`New room code: ${live.room}`);
+  }
+
+  const LIVE_TEXT = {
+    off: 'Live display off',
+    connecting: 'Connecting to relay',
+    live: 'Live',
+    offline: 'Relay offline, retrying',
+    error: 'Can\u2019t reach the relay',
+    nolib: 'Sync library didn\u2019t load'
+  };
+
+  function updateLiveUI() {
+    const s = live.status;
+    const n = live.viewers.size;
+    const viewersText = n === 0 ? 'no screens watching' : n === 1 ? '1 screen watching' : `${n} screens watching`;
+    const text = s === 'live' ? `Live, ${viewersText}` : LIVE_TEXT[s];
+
+    const badge = $('liveBadge');
+    if (!badge) return;
+    badge.dataset.state = s;
+    $('liveBadgeText').textContent = s === 'live' ? `Live: ${live.room}, ${n} watching` : LIVE_TEXT[s];
+
+    $('liveSetupStatus').textContent = s === 'off' ? 'Off. Share the turn order and timer with other screens.' : `${text}. Room ${live.room}.`;
+    $('liveSetupStatus').dataset.state = s;
+
+    $('liveModalStatus').textContent = text;
+    $('liveModalStatus').dataset.state = s;
+    $('liveToggle').textContent = live.enabled ? 'Stop sharing' : 'Go live';
+    $('liveToggle').className = live.enabled ? 'btn btn-danger' : 'btn btn-primary btn-big';
+    $('liveShare').hidden = !live.enabled;
+    $('liveRoom').textContent = live.room;
+    const link = displayLink();
+    $('liveLink').textContent = link;
+    $('liveLink').href = link;
+
+    const sel = $('relaySelect');
+    const isPreset = !!RELAYS[live.relay];
+    if (document.activeElement !== sel) sel.value = isPreset ? live.relay : 'custom';
+    $('relayCustomWrap').hidden = isPreset && sel.value !== 'custom';
+    if (!isPreset && document.activeElement !== $('relayCustom')) $('relayCustom').value = live.relay;
+
+    renderQr(link);
+  }
+
+  let lastQr = '';
+  function renderQr(text) {
+    const box = $('liveQr');
+    if (text === lastQr || !box) return;
+    lastQr = text;
+    if (typeof qrcode === 'undefined') { box.replaceChildren(el('p', 'panel-text', 'QR code unavailable. Use the link.')); return; }
+    try {
+      const q = qrcode(0, 'M');
+      q.addData(text);
+      q.make();
+      box.innerHTML = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+    } catch (e) {
+      box.replaceChildren(el('p', 'panel-text', 'QR code unavailable. Use the link.'));
+    }
+  }
+
+  let liveModalWasRunning = false;
+  function openLiveModal() {
+    liveModalWasRunning = combatStarted && !isPaused;
+    updateLiveUI();
+    $('liveModal').classList.add('open');
+  }
+  function closeLiveModal() {
+    $('liveModal').classList.remove('open');
+  }
+
+  async function copyDisplayLink() {
+    const link = displayLink();
+    try {
+      await navigator.clipboard.writeText(link);
+      toast('Display link copied.');
+    } catch (e) {
+      const r = document.createRange();
+      r.selectNodeContents($('liveLink'));
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      toast('Link selected. Copy it with Ctrl or Cmd + C.');
+    }
+  }
+
+  (function initLive() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LIVE_KEY) || 'null');
+      if (saved) { live.room = saved.room; live.relay = saved.relay || 'hivemq'; live.enabled = !!saved.enabled; }
+    } catch (e) { /* ignore */ }
+    if (!live.room) live.room = randomRoom();
+    saveLivePrefs();
+
+    $('relaySelect').addEventListener('change', (e) => {
+      if (e.target.value === 'custom') { $('relayCustomWrap').hidden = false; $('relayCustom').focus(); }
+      else changeRelay(e.target.value);
+    });
+    $('relayCustom').addEventListener('change', (e) => {
+      const v = e.target.value.trim();
+      if (/^wss?:\/\//i.test(v)) changeRelay(v);
+      else if (v) toast('Relay addresses start with wss://');
+    });
+    $('liveModal').addEventListener('click', (e) => { if (e.target === $('liveModal')) closeLiveModal(); });
+    window.addEventListener('pagehide', () => {
+      if (live.client && live.client.connected) live.client.publish(`${liveBase()}/status`, 'offline', { qos: 0, retain: true });
+    });
+
+    if (live.enabled) liveConnect();
+    else setLiveStatus('off');
+  })();
+  armable($('newRoomBtn'), 'Tap again for a new code', newRoomCode);
+
 
   refreshSetupChrome();
   updateLogPanel();
