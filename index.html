@@ -1,0 +1,2236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Encounter Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+    --bg: #e9edf2;
+    --surface: #ffffff;
+    --raised: #eef1f5;
+    --line: #cdd4de;
+    --text: #141821;
+    --muted: #4f5868;
+    --faint: #7c8595;
+    --player: #1d6fd6;
+    --monster: #c8304a;
+    --warn: #d45f00;
+    --ink-on-accent: #ffffff;
+
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #11141a;
+      --surface: #191d25;
+      --raised: #222833;
+      --line: #313947;
+      --text: #eef1f6;
+      --muted: #a6afbf;
+      --faint: #707b8e;
+      --player: #52abff;
+      --monster: #f2566e;
+      --warn: #ff8c24;
+      --ink-on-accent: #0d1016;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #11141a;
+    --surface: #191d25;
+    --raised: #222833;
+    --line: #313947;
+    --text: #eef1f6;
+    --muted: #a6afbf;
+    --faint: #707b8e;
+    --player: #52abff;
+    --monster: #f2566e;
+    --warn: #ff8c24;
+    --ink-on-accent: #0d1016;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+  body {
+    height: 100%;
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.4;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  input, select { -webkit-user-select: text; user-select: text; }
+  [hidden] { display: none !important; }
+  :focus-visible { outline: 3px solid var(--player); outline-offset: 2px; }
+
+  /* ---------- Layout ---------- */
+  .app {
+    display: grid;
+    grid-template-columns: minmax(260px, 25%) 1fr;
+    height: 100%;
+  }
+
+  /* ---------- Turn order sidebar ---------- */
+  .queue {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+  }
+  .queue-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 2.4vh 1.4rem 1.6vh;
+    border-bottom: 1px solid var(--line);
+  }
+  .live-badge {
+    flex-basis: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.55em;
+    margin-top: 0.6vh;
+    padding: 0.45em 0.7em;
+    font: inherit;
+    font-size: clamp(0.82rem, 1.6vh, 0.98rem);
+    font-weight: 600;
+    color: var(--muted);
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .live-badge:hover { border-color: var(--muted); }
+  .live-dot { width: 0.65em; height: 0.65em; border-radius: 50%; background: var(--faint); flex-shrink: 0; }
+  [data-state="live"] .live-dot, .live-status[data-state="live"]::before { background: #22b86a; box-shadow: 0 0 0 3px color-mix(in srgb, #22b86a 25%, transparent); }
+  [data-state="connecting"] .live-dot, [data-state="offline"] .live-dot,
+  .live-status[data-state="connecting"]::before, .live-status[data-state="offline"]::before { background: var(--warn); }
+  [data-state="error"] .live-dot, [data-state="nolib"] .live-dot,
+  .live-status[data-state="error"]::before, .live-status[data-state="nolib"]::before { background: var(--monster); }
+  .live-badge[data-state="live"] { color: var(--text); }
+  .live-status { display: flex; align-items: center; gap: 0.55em; font-weight: 600; color: var(--muted); }
+  .live-status::before { content: ""; width: 0.65em; height: 0.65em; border-radius: 50%; background: var(--faint); flex-shrink: 0; }
+
+  .live-card { width: min(760px, 100%); }
+  .live-share { display: grid; grid-template-columns: minmax(160px, 240px) 1fr; gap: 1.6rem; align-items: center; margin-top: 2.2vh; }
+  .live-qr { background: #fff; border-radius: 12px; padding: 8px; aspect-ratio: 1; }
+  .live-qr svg { display: block; width: 100%; height: 100%; }
+  .live-room-label { font-size: clamp(0.85rem, 1.7vh, 1rem); color: var(--muted); font-weight: 600; }
+  .live-room { font-size: clamp(2.2rem, 6vh, 3.4rem); font-weight: 800; letter-spacing: 0.08em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .live-link { display: block; margin: 1vh 0 1.4vh; font-size: clamp(0.85rem, 1.7vh, 1rem); color: var(--player); word-break: break-all; -webkit-user-select: text; user-select: text; }
+  .live-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8rem; }
+  .live-advanced { margin-top: 2.4vh; padding-top: 2vh; border-top: 1px solid var(--line); display: grid; grid-template-columns: 1fr 1fr; gap: 1.4vh 1.2rem; }
+  .live-advanced .field { min-width: 0; }
+  .live-note { grid-column: 1 / -1; font-size: clamp(0.8rem, 1.6vh, 0.95rem); color: var(--muted); }
+  @media (max-width: 700px) {
+    .live-share, .live-advanced { grid-template-columns: 1fr; }
+    .live-qr { max-width: 240px; }
+  }
+
+  .queue-title { font-size: clamp(1.1rem, 2.4vh, 1.5rem); font-weight: 700; }
+  .round { font-size: clamp(0.95rem, 1.9vh, 1.2rem); color: var(--muted); }
+  .round strong { color: var(--text); font-weight: 800; font-variant-numeric: tabular-nums; }
+
+  .queue-list {
+    list-style: none;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1.2vh 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5vh;
+  }
+  .q-item {
+    --faction: var(--player);
+    display: grid;
+    grid-template-columns: 2.6em 1fr auto;
+    gap: 0.8rem;
+    align-items: start;
+    padding: 1.1vh 0.8rem;
+    border-radius: 10px;
+    font-size: clamp(0.95rem, 1.9vh, 1.2rem);
+    position: relative;
+  }
+  .q-item.is-monster { --faction: var(--monster); }
+  .q-item::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 18%; bottom: 18%;
+    width: 4px;
+    border-radius: 4px;
+    background: var(--faction);
+  }
+  .q-item.active { background: var(--raised); }
+  .q-item > div { min-width: 0; }
+  .q-remove {
+    align-self: center;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--muted);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+  .q-remove svg { width: 18px; height: 18px; }
+  .q-item:hover .q-remove, .q-remove:focus-visible { opacity: 1; }
+  .q-remove:hover { color: var(--monster); border-color: var(--line); background: var(--surface); }
+  @media (hover: none) { .q-remove { opacity: 0.55; } }
+  .q-item.active::before { top: 8%; bottom: 8%; width: 5px; }
+  .q-init {
+    font: inherit;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: var(--faction);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 0 0.25em;
+    cursor: pointer;
+  }
+  .q-init:hover { border-color: var(--line); background: var(--surface); }
+  .q-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .q-item:not(.active) .q-name { font-weight: 600; }
+  .q-meta { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.3vh; font-size: 0.82em; color: var(--muted); }
+  .q-bank { flex: 1; max-width: 7rem; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .q-bank span { display: block; height: 100%; background: var(--faction); transform-origin: left; }
+  .q-bank-num { font-variant-numeric: tabular-nums; min-width: 2.6em; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.5vh; }
+  .chip {
+    font-size: 0.74em;
+    font-weight: 600;
+    padding: 0.1em 0.5em;
+    border-radius: 999px;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .q-item.active .chip { background: var(--surface); }
+  .chip.bloodied { color: var(--monster); border-color: var(--monster); }
+  .queue-empty { color: var(--faint); padding: 2vh 0.6rem; font-size: clamp(0.95rem, 1.8vh, 1.1rem); }
+
+  .keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.2rem;
+    padding: 1.4vh 1.4rem;
+    border-top: 1px solid var(--line);
+    font-size: clamp(0.8rem, 1.5vh, 0.95rem);
+    color: var(--faint);
+  }
+  kbd {
+    font-family: var(--font);
+    font-weight: 700;
+    font-size: 0.9em;
+    padding: 0.05em 0.45em;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    color: var(--muted);
+    background: var(--raised);
+  }
+
+  /* ---------- Workspace ---------- */
+  .workspace {
+    display: grid;
+    grid-template-rows: 1fr auto;
+    gap: 2vh;
+    padding: 2.4vh 2vw;
+    min-height: 0;
+  }
+
+  .stage {
+    --faction: var(--player);
+    position: relative;
+    display: grid;
+    grid-template-columns: 1.25fr 1fr;
+    gap: 2.4vw;
+    padding: 3.2vh 2.6vw;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--surface);
+    border: 6px solid var(--faction);
+    border-radius: 20px;
+    box-shadow: inset 0 0 90px color-mix(in srgb, var(--faction) 14%, transparent);
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .stage.is-monster { --faction: var(--monster); }
+  .stage.is-empty { --faction: var(--line); }
+
+  .stage-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .stage-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.5rem; }
+  .who { min-width: 0; }
+  .faction-tag {
+    display: inline-block;
+    font-size: clamp(0.85rem, 1.7vh, 1.05rem);
+    font-weight: 700;
+    color: var(--faction);
+    margin-bottom: 0.4vh;
+  }
+  .name {
+    font-size: clamp(2rem, 6.4vh, 4.6rem);
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .init {
+    flex-shrink: 0;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    text-align: center;
+    padding: 1vh 1.2vw;
+    border-radius: 14px;
+    background: var(--raised);
+    border: 1px solid var(--line);
+  }
+  .init:hover { border-color: var(--faction); }
+  .init-label { display: block; font-size: clamp(0.75rem, 1.5vh, 0.95rem); color: var(--muted); font-weight: 600; }
+  .init-value { display: block; font-size: clamp(1.8rem, 5vh, 3.4rem); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+
+  .clock { flex: 1; display: flex; flex-direction: column; justify-content: center; min-height: 0; }
+  .clock-label { font-size: clamp(1rem, 2.1vh, 1.3rem); font-weight: 600; color: var(--muted); }
+  .timer {
+    font-size: clamp(3.5rem, min(21vh, 26vw), 15rem);
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+    margin: 0.6vh 0 1.8vh;
+    transition: color 0.15s;
+  }
+  .bar { height: 2.2vh; min-height: 12px; border-radius: 999px; background: var(--raised); border: 1px solid var(--line); overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--faction); transform-origin: left; }
+  .clock-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 1.4vh;
+    font-size: clamp(0.9rem, 1.8vh, 1.1rem);
+    color: var(--muted);
+  }
+  .status {
+    flex-shrink: 0;
+    font-weight: 700;
+    padding: 0.2em 0.8em;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+  }
+  .running .status { color: var(--faction); border-color: var(--faction); }
+  .next {
+    margin-top: 2vh;
+    padding-top: 1.6vh;
+    border-top: 1px solid var(--line);
+    font-size: clamp(1rem, 2.1vh, 1.3rem);
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .next strong { color: var(--text); font-weight: 700; margin-left: 0.4em; }
+
+  .stage-side { display: flex; flex-direction: column; gap: 2vh; min-height: 0; min-width: 0; }
+  .side-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2vh 0.8vw; }
+  .side-actions .wide { grid-column: span 2; }
+  .rules {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1.8vh 1.2vw;
+  }
+  .rules h3 { font-size: clamp(1rem, 2vh, 1.25rem); font-weight: 700; margin-bottom: 1vh; }
+  .rules-body { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 1.2vh; }
+  .rule strong { display: block; font-size: clamp(0.95rem, 1.9vh, 1.2rem); }
+  .rule p { font-size: clamp(0.88rem, 1.75vh, 1.1rem); color: var(--muted); max-width: 60ch; }
+  .rules-empty { font-size: clamp(0.9rem, 1.8vh, 1.1rem); color: var(--faint); }
+
+  /* Bloodied: drips sit behind the clock */
+  .clock { position: relative; isolation: isolate; }
+  .blood {
+    display: none;
+    position: absolute;
+    inset: -1vh -1.2vw;
+    z-index: -1;
+    pointer-events: none;
+    color: var(--monster);
+    opacity: 0.16;
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .blood svg { display: block; width: 100%; height: 100%; }
+  .stage.is-monster.is-bloodied .blood { display: block; }
+  .bloodied-note { display: none; color: var(--monster); font-weight: 700; }
+  .stage.is-monster.is-bloodied .bloodied-note { display: inline; }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5em;
+    padding: 1.6vh 1.4em;
+    min-height: 48px;
+    font-size: clamp(1rem, 2.1vh, 1.3rem);
+    font-weight: 700;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: filter 0.1s, background 0.1s;
+  }
+  .btn:hover { filter: brightness(1.06); }
+  .btn:active { filter: brightness(0.9); }
+  .btn-primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .btn-danger { background: transparent; color: var(--monster); border: 2px solid var(--monster); }
+  .btn-ghost { background: transparent; }
+  .btn-big { font-size: clamp(1.1rem, 2.5vh, 1.5rem); padding-inline: 2em; }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 1vw;
+  }
+  .controls .spacer { flex: 1; }
+  #pauseBtn { min-width: 8.5em; }
+  .paused #pauseBtn { background: var(--faction); color: var(--ink-on-accent); border-color: var(--faction); }
+
+  /* ---------- Timer warnings (players only) ---------- */
+  .running .stage.warn-pulse { animation: edgePulse 1s linear infinite; }
+  .running .stage.warn-pulse .timer { animation: textPulse 1s linear infinite; }
+  .running .stage.warn-rapid { animation: edgeRapid 0.4s steps(1) infinite; }
+  .running .stage.warn-rapid .timer { animation: textRapid 0.4s steps(1) infinite; }
+  .stage.warn-solid, .stage.warn-static { --faction: var(--warn); }
+  .stage.warn-solid .timer, .stage.warn-static .timer { color: var(--warn); }
+
+  @keyframes edgePulse { 25%, 75% { border-color: var(--warn); } }
+  @keyframes textPulse { 25%, 75% { color: var(--warn); } }
+  @keyframes edgeRapid { 50% { border-color: var(--warn); } }
+  @keyframes textRapid { 50% { color: var(--warn); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .running .stage.warn-pulse, .running .stage.warn-rapid,
+    .running .stage.warn-pulse .timer, .running .stage.warn-rapid .timer { animation: none; }
+    .running .stage.warn-rapid { --faction: var(--warn); }
+    .running .stage.warn-rapid .timer { color: var(--warn); }
+    .dodge-title { animation: none !important; }
+  }
+
+  /* ---------- Conditions dialog ---------- */
+  .modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 4vh 4vw;
+    background: color-mix(in srgb, var(--bg) 70%, transparent);
+    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(4px);
+  }
+  .modal.open { display: flex; }
+  .modal-card {
+    width: min(900px, 100%);
+    max-height: 100%;
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 3vh 2.4vw;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+  }
+  .modal-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 2.2vh; }
+  .modal-head h2 { font-size: clamp(1.3rem, 3vh, 1.9rem); font-weight: 800; }
+  .modal-head p { color: var(--muted); font-size: clamp(0.9rem, 1.8vh, 1.05rem); }
+  .cond-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2vh 0.8vw; }
+  .cond-toggle {
+    padding: 1.8vh 0.8rem;
+    min-height: 48px;
+    font-size: clamp(1rem, 2vh, 1.25rem);
+    font-weight: 600;
+    text-align: left;
+    background: var(--raised);
+    border: 2px solid var(--line);
+    border-radius: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .cond-toggle::after { content: ""; width: 0.9em; height: 0.9em; border-radius: 50%; border: 2px solid var(--line); flex-shrink: 0; }
+  .cond-toggle.active { color: var(--text); border-color: var(--player); background: color-mix(in srgb, var(--player) 12%, var(--surface)); }
+  .cond-toggle.active::after { background: var(--player); border-color: var(--player); }
+  .modal-foot { display: flex; justify-content: flex-end; margin-top: 2.4vh; }
+
+  /* ---------- Setup screen ---------- */
+  .setup {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+    background: var(--bg);
+    padding: calc(4vh + env(safe-area-inset-top, 0px)) 5vw calc(4vh + env(safe-area-inset-bottom, 0px));
+    grid-template-columns: 1fr 1fr;
+    gap: 4vw;
+    overflow-y: auto;
+  }
+  .setup.open { display: grid; }
+  .setup-col { display: flex; flex-direction: column; gap: 3vh; min-height: 0; }
+  .setup h1 { font-size: clamp(1.8rem, 4.6vh, 3rem); font-weight: 800; letter-spacing: -0.015em; line-height: 1.1; }
+  .setup .lede { color: var(--muted); font-size: clamp(1rem, 2vh, 1.2rem); max-width: 55ch; margin-top: 0.8vh; }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 2.4vh 1.6vw;
+  }
+  .panel h2 { font-size: clamp(1.1rem, 2.4vh, 1.5rem); font-weight: 700; margin-bottom: 1.8vh; }
+  .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 1.8vh 1.2vw; }
+  .field label { display: block; font-weight: 700; font-size: clamp(0.95rem, 1.9vh, 1.15rem); margin-bottom: 0.5vh; }
+  .field .help { display: block; font-size: clamp(0.8rem, 1.6vh, 0.95rem); color: var(--muted); margin-top: 0.5vh; }
+  .input, .select {
+    width: 100%;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.4vh 0.9rem;
+    min-height: 48px;
+    font-size: clamp(1rem, 2.1vh, 1.25rem);
+    outline: none;
+  }
+  .input:focus, .select:focus { border-color: var(--player); box-shadow: 0 0 0 3px color-mix(in srgb, var(--player) 25%, transparent); }
+  .input-wrap { position: relative; }
+  .input-wrap .unit { position: absolute; right: 0.9rem; top: 50%; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
+  .add-row { display: grid; grid-template-columns: 1fr 10rem; gap: 0.8vw; }
+  .add-row + .btn { width: 100%; margin-top: 1.4vh; }
+  .setup-actions { display: flex; align-items: center; gap: 1vw; margin-top: auto; }
+  .setup-actions .btn { flex: 1; }
+  .btn.btn-quiet {
+    flex: 0 0 auto;
+    background: transparent;
+    border: 1px dashed var(--line);
+    color: var(--muted);
+    font-size: clamp(0.9rem, 1.8vh, 1.05rem);
+    font-weight: 600;
+    padding-inline: 1.1em;
+  }
+  .btn.btn-quiet.armed { color: var(--monster); border: 2px solid var(--monster); }
+
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+  .roster-panel { flex: 1; display: flex; flex-direction: column; min-height: 22vh; }
+  .panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: 1.2vh; }
+  .panel-head h2 { margin: 0; }
+  .init-prompt { font-size: clamp(0.9rem, 1.8vh, 1.05rem); color: var(--muted); margin-bottom: 1.6vh; min-height: 1.4em; }
+  .init-prompt.needs { color: var(--warn); font-weight: 700; }
+  .panel-text { font-size: clamp(0.9rem, 1.8vh, 1.05rem); color: var(--muted); max-width: 60ch; }
+  .log-actions { display: flex; justify-content: space-between; align-items: center; gap: 1vw; margin-top: 1.8vh; }
+  .toast {
+    position: fixed;
+    left: 50%;
+    top: calc(3vh + env(safe-area-inset-top, 0px));
+    transform: translateX(-50%);
+    z-index: 3000;
+    background: var(--text);
+    color: var(--bg);
+    font-weight: 700;
+    padding: 0.8em 1.4em;
+    border-radius: 12px;
+    font-size: clamp(0.95rem, 1.9vh, 1.15rem);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .toast.show { opacity: 1; }
+  .count { color: var(--muted); font-size: clamp(0.9rem, 1.8vh, 1.05rem); }
+  .s-list { list-style: none; display: flex; flex-direction: column; gap: 0.8vh; overflow-y: auto; min-height: 0; }
+  .s-item {
+    --faction: var(--player);
+    display: grid;
+    grid-template-columns: auto 1fr auto auto auto;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.8vh 0.6rem 0.8vh 0.8rem;
+    border-radius: 10px;
+    background: var(--raised);
+    border-left: 5px solid var(--faction);
+    font-size: clamp(1rem, 2vh, 1.2rem);
+  }
+  .s-item.is-monster { --faction: var(--monster); }
+  .s-init-btn {
+    width: 4em;
+    min-height: 44px;
+    padding: 0.3em 0.4em;
+    text-align: center;
+    font: inherit;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: var(--faction);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .s-init-btn:hover { border-color: var(--faction); }
+  .s-init-btn.needs { border: 2px dashed var(--warn); color: var(--warn); }
+
+  /* Initiative pad */
+  .pad-card {
+    --faction: var(--player);
+    width: min(420px, 100%);
+    text-align: center;
+    border-top: 6px solid var(--faction);
+    padding: 2.6vh 1.6rem;
+  }
+  .pad-card.is-monster { --faction: var(--monster); }
+  .pad-faction { color: var(--faction); font-weight: 700; font-size: clamp(0.85rem, 1.7vh, 1rem); }
+  .pad-card h2 {
+    font-size: clamp(1.3rem, 3vh, 1.8rem);
+    font-weight: 800;
+    line-height: 1.15;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pad-progress { color: var(--muted); font-size: clamp(0.85rem, 1.7vh, 1rem); min-height: 1.4em; }
+  .pad-display {
+    display: block;
+    margin: 1.4vh 0 1.8vh;
+    padding: 1.2vh 0;
+    font-size: clamp(3.2rem, 11vh, 5.5rem);
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+  }
+  .pad-display.empty { color: var(--faint); }
+  .pad-display.fresh { color: var(--muted); }
+  .pad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1vh 0.6rem; }
+  .pad-key {
+    height: 8vh;
+    min-height: 52px;
+    max-height: 76px;
+    font: inherit;
+    font-size: clamp(1.4rem, 3.4vh, 2rem);
+    font-weight: 700;
+    color: var(--text);
+    background: var(--raised);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: background 0.08s, border-color 0.08s;
+  }
+  .pad-key.fn { color: var(--muted); font-size: clamp(1.1rem, 2.6vh, 1.5rem); }
+  .pad-key:active, .pad-key.hit { background: color-mix(in srgb, var(--faction) 22%, var(--raised)); border-color: var(--faction); }
+  .pad-foot { display: flex; gap: 0.6rem; margin-top: 1.8vh; }
+  .pad-foot .btn-primary { flex: 1; }
+  .pad-keys { margin-top: 1.4vh; font-size: clamp(0.78rem, 1.5vh, 0.9rem); color: var(--faint); }
+  .s-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .s-faction { font-size: 0.85em; color: var(--muted); }
+  .s-name-input {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    padding: 0.3em 0.55em;
+    font: inherit;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--faction);
+    border-radius: 8px;
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--faction) 25%, transparent);
+  }
+  .s-edit, .s-remove {
+    font: inherit;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--muted);
+    padding: 0.5em 0.8em;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.85em;
+    cursor: pointer;
+    min-height: 40px;
+  }
+  .s-remove:hover { color: var(--monster); border-color: var(--line); }
+  .s-edit:hover { color: var(--text); border-color: var(--line); }
+  .s-edit.saving { color: var(--faction); border-color: var(--faction); }
+  .s-empty { color: var(--faint); padding: 2vh 0; font-size: clamp(1rem, 2vh, 1.15rem); }
+
+  /* ---------- Time-out overlay ---------- */
+  .dodge {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    background: var(--warn);
+    color: #fff;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 4vh 4vw;
+  }
+  .dodge.open { display: flex; }
+  .dodge-title { font-size: clamp(3.5rem, 16vh, 12rem); font-weight: 800; letter-spacing: -0.03em; line-height: 1; animation: punch 0.25s infinite alternate; }
+  .dodge-sub { font-size: clamp(1.2rem, 4vh, 2.4rem); font-weight: 600; margin-top: 2vh; opacity: 0.92; }
+  @keyframes punch { from { transform: scale(0.95); } to { transform: scale(1.05); } }
+
+  /* ---------- Narrow screens ---------- */
+  @media (max-width: 900px) {
+    body { overflow: auto; }
+    .app { grid-template-columns: 1fr; grid-template-rows: auto auto; height: auto; min-height: 100%; }
+    .queue { order: 2; border-right: 0; border-top: 1px solid var(--line); }
+    .workspace { order: 1; }
+    .stage { grid-template-columns: 1fr; }
+    .rules { min-height: 22vh; }
+    .controls { flex-wrap: wrap; }
+    .controls .spacer { display: none; }
+    .controls .btn { flex: 1 1 40%; }
+    .setup { grid-template-columns: 1fr; }
+    .fields { grid-template-columns: 1fr; }
+    .add-row { grid-template-columns: 1fr; }
+    .cond-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.16.0/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js"></script>
+</head>
+<body>
+
+<div class="app">
+
+  <aside class="queue" aria-label="Initiative order">
+    <header class="queue-head">
+      <div id="queueTitle" class="queue-title">Encounter 1</div>
+      <div class="round">Round <strong id="roundNum">1</strong></div>
+      <button id="liveBadge" class="live-badge" data-state="off" onclick="openLiveModal()">
+        <span class="live-dot"></span><span id="liveBadgeText">Live display off</span>
+      </button>
+    </header>
+    <ol id="queueList" class="queue-list"></ol>
+    <footer class="keys">
+      <span><kbd>Space</kbd> Pause or resume</span>
+      <span><kbd>←</kbd> <kbd>→</kbd> Change turn</span>
+      <span><kbd>↑</kbd> <kbd>↓</kbd> ±10 seconds</span>
+    </footer>
+  </aside>
+
+  <main id="workspace" class="workspace paused">
+    <section id="stage" class="stage is-empty" aria-live="polite">
+      <div class="stage-main">
+        <div class="stage-head">
+          <div class="who">
+            <span id="factionTag" class="faction-tag">&nbsp;</span> <span class="bloodied-note">Bloodied</span>
+            <h1 id="currentName" class="name">No combatants yet</h1>
+          </div>
+          <button class="init" onclick="openInitPadForActive()" title="Change initiative">
+            <span class="init-label">Initiative</span>
+            <span id="currentInit" class="init-value">–</span>
+          </button>
+        </div>
+
+        <div class="clock">
+          <div class="blood" aria-hidden="true">
+            <svg viewBox="0 0 1200 400" preserveAspectRatio="none" fill="currentColor">
+              <path d="M0,0 L1200,0 L1200,120 C1150,135 1120,60 1070,150 C1030,230 1000,110 960,210 C925,300 890,140 850,120 C800,100 770,260 720,280 C670,300 640,90 590,160 C550,220 520,340 470,340 C420,340 395,120 345,190 C305,245 275,110 235,130 C185,155 150,300 100,250 C60,210 35,100 0,120 Z"/>
+              <circle cx="100" cy="310" r="18"/><circle cx="470" cy="385" r="14"/><circle cx="720" cy="330" r="12"/><circle cx="960" cy="265" r="15"/>
+            </svg>
+          </div>
+          <div id="clockLabel" class="clock-label">Open setup to add combatants</div>
+          <div id="timerDisplay" class="timer">0:00</div>
+          <div class="bar"><div id="progressBar" class="bar-fill"></div></div>
+          <div class="clock-meta">
+            <span id="clockNote">&nbsp;</span>
+            <span id="statusPill" class="status">Paused</span>
+          </div>
+        </div>
+
+        <div class="next">Up next<strong id="nextName">–</strong></div>
+      </div>
+
+      <div class="stage-side">
+        <div class="side-actions">
+          <button class="btn wide" onclick="openConditionsModal()">Edit conditions</button>
+          <button id="bloodiedBtn" class="btn btn-danger wide" onclick="toggleBloodiedState()" hidden>Mark bloodied</button>
+          <button class="btn" onclick="manualTimeAdjust(-10)">−10 seconds</button>
+          <button class="btn" onclick="manualTimeAdjust(10)">+10 seconds</button>
+        </div>
+        <div class="rules">
+          <h3>Active conditions</h3>
+          <div id="rulesSummary" class="rules-body"></div>
+        </div>
+      </div>
+    </section>
+
+    <nav class="controls" aria-label="Combat controls">
+      <button class="btn btn-ghost" onclick="openSetup()">Setup</button>
+      <button class="btn btn-ghost" onclick="saveSessionLog()">Save log</button>
+      <button id="pauseBtn" class="btn" onclick="togglePauseState()">Resume</button>
+      <div class="spacer"></div>
+      <button class="btn" onclick="prevTurn()">◀ Previous</button>
+      <button class="btn btn-primary btn-big" onclick="nextTurn()">Next turn ▶</button>
+    </nav>
+  </main>
+</div>
+
+<!-- Conditions dialog -->
+<div id="conditionsModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="condTitle">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="condTitle">Conditions</h2>
+      <p>The timer is paused while this is open.</p>
+    </div>
+    <div id="condGrid" class="cond-grid"></div>
+    <div class="modal-foot">
+      <button class="btn btn-primary btn-big" onclick="closeConditionsModal()">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- Setup screen -->
+<div id="setup" class="setup open">
+  <div class="setup-col">
+    <div>
+      <h1 id="setupTitle">Encounter 1 setup</h1>
+      <p class="lede">Each player draws from a personal time bank that carries over between turns. Monsters get a fixed clock every turn. When a clock hits zero, the turn passes automatically.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Turn timing</h2>
+      <div class="fields">
+        <div class="field">
+          <label for="cfgStartBank">Starting bank</label>
+          <div class="input-wrap"><input class="input" type="number" id="cfgStartBank" value="90" min="0"><span class="unit">sec</span></div>
+          <span class="help">What each player begins with.</span>
+        </div>
+        <div class="field">
+          <label for="cfgLapRefill">Refill per turn</label>
+          <div class="input-wrap"><input class="input" type="number" id="cfgLapRefill" value="45" min="0"><span class="unit">sec</span></div>
+          <span class="help">Added to a player's bank when they end their turn.</span>
+        </div>
+        <div class="field">
+          <label for="cfgMaxCap">Bank limit</label>
+          <div class="input-wrap"><input class="input" type="number" id="cfgMaxCap" value="120" min="1"><span class="unit">sec</span></div>
+          <span class="help">The most a player's bank can hold.</span>
+        </div>
+        <div class="field">
+          <label for="cfgMonster">Monster turn</label>
+          <div class="input-wrap"><input class="input" type="number" id="cfgMonster" value="30" min="1"><span class="unit">sec</span></div>
+          <span class="help">Fixed clock, reset every monster turn.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Add a combatant</h2>
+      <div class="add-row">
+        <input class="input" type="text" id="newName" placeholder="Name" aria-label="Name">
+        <select class="select" id="newFaction" aria-label="Side">
+          <option value="player">Player</option>
+          <option value="monster">Monster</option>
+        </select>
+      </div>
+      <button class="btn" onclick="executeReinforcementInsertion()">Add and roll initiative</button>
+    </div>
+
+    <div class="setup-actions">
+      <button id="newEncBtn" class="btn btn-quiet" hidden>New encounter</button>
+      <button id="launchBtn" class="btn btn-primary btn-big" onclick="launchCombatTrackerMode()">Start combat</button>
+      <button id="backBtn" class="btn btn-primary btn-big" onclick="closeSetup()" hidden>Back to combat</button>
+    </div>
+  </div>
+
+  <div class="setup-col">
+    <div class="panel roster-panel">
+      <div class="panel-head">
+        <h2>Initiative order</h2>
+        <span id="rosterCount" class="count"></span>
+      </div>
+      <p id="initPrompt" class="init-prompt"></p>
+      <ol id="rosterList" class="s-list"></ol>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Live display</h2>
+        <button class="btn btn-quiet" onclick="openLiveModal()">Set up</button>
+      </div>
+      <p id="liveSetupStatus" class="live-status" data-state="off">Off</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Session log</h2>
+        <span id="logCount" class="count"></span>
+      </div>
+      <p class="panel-text">Every roll, turn, pause, time change and condition is recorded, and the log survives a page reload. Save it as a .json file when the session wraps.</p>
+      <div class="log-actions">
+        <button id="clearLogBtn" class="btn btn-quiet">Start a new log</button>
+        <button class="btn" onclick="saveSessionLog()">Save session log</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Time-out overlay -->
+<!-- Initiative pad -->
+<div id="initModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="padTitle">
+  <div id="padCard" class="modal-card pad-card">
+    <div id="padFaction" class="pad-faction">Player</div>
+    <h2 id="padTitle">Initiative</h2>
+    <div id="padProgress" class="pad-progress"></div>
+    <output id="padDisplay" class="pad-display empty" aria-live="polite">–</output>
+    <div class="pad-grid">
+      <button class="pad-key" data-key="7">7</button>
+      <button class="pad-key" data-key="8">8</button>
+      <button class="pad-key" data-key="9">9</button>
+      <button class="pad-key" data-key="4">4</button>
+      <button class="pad-key" data-key="5">5</button>
+      <button class="pad-key" data-key="6">6</button>
+      <button class="pad-key" data-key="1">1</button>
+      <button class="pad-key" data-key="2">2</button>
+      <button class="pad-key" data-key="3">3</button>
+      <button class="pad-key fn" data-key="neg" aria-label="Toggle negative">±</button>
+      <button class="pad-key" data-key="0">0</button>
+      <button class="pad-key fn" data-key="back" aria-label="Delete last digit">⌫</button>
+    </div>
+    <div class="pad-foot">
+      <button id="padSkip" class="btn btn-quiet" onclick="skipInitPad()">Skip</button>
+      <button id="padSet" class="btn btn-primary btn-big" onclick="commitInitPad()">Set initiative</button>
+    </div>
+    <p class="pad-keys">Number keys or numpad to type. <kbd>Enter</kbd> sets, <kbd>Backspace</kbd> deletes, <kbd>Esc</kbd> closes.</p>
+  </div>
+</div>
+
+<!-- Live display -->
+<div id="liveModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="liveTitle">
+  <div class="modal-card live-card">
+    <div class="modal-head">
+      <h2 id="liveTitle">Live display</h2>
+      <p id="liveModalStatus" class="live-status" data-state="off">Off</p>
+    </div>
+    <p class="panel-text">Mirror the turn order and timer on a TV, tablet or phone. Open the display page on that screen and scan the code, or type the room code in.</p>
+
+    <div id="liveShare" class="live-share" hidden>
+      <div id="liveQr" class="live-qr" aria-label="QR code for the display page"></div>
+      <div>
+        <div class="live-room-label">Room code</div>
+        <div id="liveRoom" class="live-room"></div>
+        <a id="liveLink" class="live-link" target="_blank" rel="noopener"></a>
+        <div class="live-row">
+          <button class="btn" onclick="copyDisplayLink()">Copy link</button>
+          <button id="newRoomBtn" class="btn btn-quiet">New room code</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="live-advanced">
+      <div class="field">
+        <label for="relaySelect">Relay server</label>
+        <select id="relaySelect" class="select">
+          <option value="hivemq">HiveMQ public relay</option>
+          <option value="emqx">EMQX public relay</option>
+          <option value="custom">Custom address…</option>
+        </select>
+        <span class="help">If screens won't connect, switch relays. Every screen follows the link's relay.</span>
+      </div>
+      <div id="relayCustomWrap" class="field" hidden>
+        <label for="relayCustom">Custom relay address</label>
+        <input id="relayCustom" class="input" type="text" placeholder="wss://example.com:8884/mqtt" spellcheck="false">
+        <span class="help">An MQTT server that accepts secure WebSocket connections.</span>
+      </div>
+      <p class="live-note">The relays are free public servers. Anyone who has the room code can watch, so keep private details out of names. The tracker keeps running normally if the relay drops.</p>
+    </div>
+
+    <div class="modal-foot" style="gap:0.8rem">
+      <button id="liveToggle" class="btn btn-primary btn-big" onclick="setLiveEnabled(!live.enabled)">Go live</button>
+      <button class="btn" onclick="closeLiveModal()">Done</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status"></div>
+
+<div id="dodgeOverlay" class="dodge" role="alert">
+  <div class="dodge-title">Nice dodge!</div>
+  <div class="dodge-sub">Time ran out. Passing to the next turn.</div>
+</div>
+
+<script>
+  const tuning = { startBank: 90, lapRefill: 45, maxCap: 120, monsterStatic: 30 };
+  let roster = [];
+  let currentIndex = 0;
+  let isPaused = true;
+  let lastTimestamp = null;
+  let dodgeTimeoutId = null;
+  let round = 1;
+  let combatStarted = false;
+  let modalWasRunning = false;
+  let nextId = 1;
+  let encounterNo = 1;
+  let turnOpen = false;
+  let turnElapsed = 0;
+
+  const $ = (id) => document.getElementById(id);
+  const r1 = (n) => Math.round(n * 10) / 10;
+  const pad = (n) => String(n).padStart(2, '0');
+
+  const conditionRules = {
+    Blinded: "Attacks against you have advantage. Your attacks have disadvantage. You fail checks that need sight.",
+    Charmed: "You can't attack or target the charmer with harmful effects. The charmer has advantage on social checks with you.",
+    Deafened: "You automatically fail checks that need hearing.",
+    Frightened: "Disadvantage on ability checks and attack rolls while the source is in sight. You can't move closer to it.",
+    Grappled: "Your speed is 0. Ends if the grappler is incapacitated or you're moved out of reach.",
+    Incapacitated: "You can't take actions or reactions.",
+    Invisible: "You're heavily obscured. Attacks against you have disadvantage. Your attacks have advantage.",
+    Paralyzed: "Incapacitated and speed 0. You fail Str and Dex saves. Hits from within 5 ft are critical hits.",
+    Petrified: "Turned to stone. Speed 0 and incapacitated. Resistance to all damage. Immune to poison.",
+    Poisoned: "Disadvantage on attack rolls and ability checks.",
+    Prone: "You can only crawl. Disadvantage on your attacks. Melee attacks against you have advantage.",
+    Restrained: "Speed 0. Your attacks have disadvantage and attacks against you have advantage. Disadvantage on Dex saves.",
+    Stunned: "Incapacitated. You fail Str and Dex saves. Attacks against you have advantage.",
+    Unconscious: "Incapacitated, drop what you hold, and fall prone. You fail Str and Dex saves. Hits from within 5 ft are critical hits.",
+    Exhaustion: "Penalties stack by level: disadvantage on checks and saves, reduced speed and max HP, and death at the highest level."
+  };
+
+  // ---------- Session log ----------
+  const LOG_KEY = 'encounterTracker.sessionLog.v1';
+  let sessionLog = null;
+
+  function freshLog() { return { startedAt: new Date().toISOString(), events: [] }; }
+  function persistLog() {
+    try { localStorage.setItem(LOG_KEY, JSON.stringify(sessionLog)); } catch (e) { /* storage unavailable */ }
+  }
+  function logEvent(type, data) {
+    const now = Date.now();
+    sessionLog.events.push(Object.assign({
+      type,
+      at: new Date(now).toISOString(),
+      sessionSeconds: r1((now - Date.parse(sessionLog.startedAt)) / 1000),
+      encounter: encounterNo
+    }, data || {}));
+    persistLog();
+    updateLogPanel();
+  }
+  function snap(c) {
+    return { combatantId: c.id, name: c.name, faction: c.faction, initiative: c.init };
+  }
+
+  (function initLog() {
+    let prev = null;
+    try {
+      const raw = localStorage.getItem(LOG_KEY);
+      if (raw) {
+        const p = JSON.parse(raw);
+        if (p && Array.isArray(p.events) && p.startedAt) prev = p;
+      }
+    } catch (e) { /* ignore */ }
+
+    if (prev && prev.events.length) {
+      sessionLog = prev;
+      encounterNo = prev.events.filter(e => e.type === 'encounter_start').length + 1;
+      const maxId = prev.events.reduce((m, e) => Math.max(m, typeof e.combatantId === 'number' ? e.combatantId : 0), 0);
+      nextId = maxId + 1;
+      logEvent('page_reloaded');
+    } else {
+      sessionLog = freshLog();
+      logEvent('session_start');
+    }
+  })();
+
+  function updateLogPanel() {
+    const n = sessionLog.events.length;
+    const t = new Date(sessionLog.startedAt);
+    const sameDay = t.toDateString() === new Date().toDateString();
+    const when = sameDay
+      ? t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      : t.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const node = $('logCount');
+    if (node) node.textContent = `${n} ${n === 1 ? 'event' : 'events'} since ${when}`;
+  }
+
+  function buildSessionExport() {
+    const encounters = {};
+    sessionLog.events.forEach(e => {
+      const k = e.encounter;
+      if (!k) return;
+      const enc = encounters[k] || (encounters[k] = {
+        encounter: k, startedAt: null, endedAt: null, rounds: 0, turns: 0, timeouts: 0, combatants: {}
+      });
+      if (e.type === 'encounter_start') enc.startedAt = e.at;
+      if (e.type === 'encounter_end') enc.endedAt = e.at;
+      if (e.type === 'turn_start') enc.rounds = Math.max(enc.rounds, e.round || 0);
+      if (e.type === 'turn_end') {
+        enc.turns++;
+        const c = enc.combatants[e.combatantId] || (enc.combatants[e.combatantId] = {
+          combatantId: e.combatantId, name: e.name, faction: e.faction, turns: 0, secondsOnClock: 0, timeouts: 0
+        });
+        c.name = e.name;
+        c.turns++;
+        c.secondsOnClock = r1(c.secondsOnClock + (e.secondsOnClock || 0));
+        if (e.reason === 'timeout') { c.timeouts++; enc.timeouts++; }
+      }
+    });
+
+    const list = Object.values(encounters)
+      .filter(e => e.startedAt)
+      .map(e => Object.assign({}, e, {
+        durationSeconds: r1(((e.endedAt ? Date.parse(e.endedAt) : Date.now()) - Date.parse(e.startedAt)) / 1000),
+        inProgress: !e.endedAt,
+        combatants: Object.values(e.combatants)
+          .map(c => Object.assign({}, c, { averageSecondsPerTurn: c.turns ? r1(c.secondsOnClock / c.turns) : 0 }))
+          .sort((a, b) => b.secondsOnClock - a.secondsOnClock)
+      }));
+
+    return {
+      format: 'encounter-tracker-session',
+      version: 1,
+      sessionStartedAt: sessionLog.startedAt,
+      savedAt: new Date().toISOString(),
+      sessionDurationSeconds: r1((Date.now() - Date.parse(sessionLog.startedAt)) / 1000),
+      settings: Object.assign({}, tuning),
+      summary: { encounters: list },
+      events: sessionLog.events
+    };
+  }
+
+  // Downloads: the claude.ai viewer provides a save prompt; a local file uses a plain download.
+  let downloadsNS = null;
+  const downloadsReady = (window.claude && typeof window.claude.use === 'function')
+    ? window.claude.use('downloads').then(ns => { downloadsNS = ns; }).catch(() => { downloadsNS = null; })
+    : Promise.resolve();
+
+  async function saveSessionLog() {
+    if (!isPaused && combatStarted) setPaused(true);
+    logEvent('log_saved');
+    const data = JSON.stringify(buildSessionExport(), null, 2);
+    const d = new Date();
+    const filename = `encounter-session-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
+
+    await downloadsReady;
+    if (downloadsNS) {
+      try {
+        await downloadsNS.save({ filename, data });
+        toast('Session log saved.');
+      } catch (err) {
+        const code = err && err.code;
+        if (code === 'declined') toast('Save cancelled.');
+        else if (code === 'rate_limited') toast('A save prompt is already open.');
+        else toast('Saving isn\u2019t available in this view.');
+      }
+      return;
+    }
+    try {
+      const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      toast('Session log saved.');
+    } catch (e) {
+      toast('Saving isn\u2019t available in this view.');
+    }
+  }
+
+  function startNewLog() {
+    sessionLog = freshLog();
+    logEvent('session_start', { encounterInProgress: combatStarted });
+    if (combatStarted) {
+      logEvent('encounter_start', { settings: Object.assign({}, tuning), roster: roster.map(snap), resumedMidEncounter: true });
+    }
+    toast('Started a new session log.');
+  }
+
+  let toastTimer = null;
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+
+  // Two-tap confirm for destructive buttons
+  function armable(btn, armedText, action) {
+    const base = btn.textContent;
+    let timer = null;
+    const reset = () => { clearTimeout(timer); btn.classList.remove('armed'); btn.textContent = base; };
+    btn.onclick = () => {
+      if (btn.classList.contains('armed')) { reset(); action(); return; }
+      btn.classList.add('armed');
+      btn.textContent = armedText;
+      timer = setTimeout(reset, 3000);
+    };
+    btn.disarm = reset;
+  }
+
+  // ---------- Buzzer ----------
+  function fireBuzzerAudioContext() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const ctx = new AC();
+      const t = ctx.currentTime;
+      const osc1 = ctx.createOscillator(), gain1 = ctx.createGain();
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(100, t);
+      osc1.frequency.linearRampToValueAtTime(65, t + 0.55);
+      gain1.gain.setValueAtTime(0.3, t);
+      gain1.gain.linearRampToValueAtTime(0.01, t + 0.55);
+      osc1.connect(gain1); gain1.connect(ctx.destination);
+      const osc2 = ctx.createOscillator(), gain2 = ctx.createGain();
+      osc2.type = 'triangle';
+      osc2.frequency.setValueAtTime(523.25, t + 0.08);
+      osc2.frequency.setValueAtTime(783.99, t + 0.22);
+      gain2.gain.setValueAtTime(0, t);
+      gain2.gain.setValueAtTime(0.22, t + 0.08);
+      gain2.gain.linearRampToValueAtTime(0.01, t + 0.45);
+      osc2.connect(gain2); gain2.connect(ctx.destination);
+      osc1.start(); osc2.start();
+      osc1.stop(t + 0.6); osc2.stop(t + 0.6);
+    } catch (err) { console.warn("Audio unavailable", err); }
+  }
+
+  // ---------- Keyboard ----------
+  window.addEventListener('keydown', (e) => {
+    const tag = document.activeElement && document.activeElement.tagName;
+    const setupOpen = $('setup').classList.contains('open');
+    const modalOpen = $('conditionsModal').classList.contains('open');
+
+    if ($('initModal').classList.contains('open')) { handlePadKey(e); return; }
+    if ($('liveModal').classList.contains('open')) { if (e.key === 'Escape') closeLiveModal(); return; }
+
+    if (e.key === 'Escape') {
+      if (modalOpen) { closeConditionsModal(); return; }
+      if (setupOpen && combatStarted) { closeSetup(); return; }
+    }
+    if (setupOpen && e.key === 'Enter' && document.activeElement === $('newName')) {
+      e.preventDefault(); executeReinforcementInsertion(); return;
+    }
+    if (tag === 'INPUT' || tag === 'SELECT' || setupOpen || modalOpen) return;
+    if (e.code === 'Space') { e.preventDefault(); togglePauseState(); }
+    if (e.code === 'ArrowRight') { e.preventDefault(); nextTurn(); }
+    if (e.code === 'ArrowLeft') { e.preventDefault(); prevTurn(); }
+    if (e.code === 'ArrowUp') { e.preventDefault(); manualTimeAdjust(10); }
+    if (e.code === 'ArrowDown') { e.preventDefault(); manualTimeAdjust(-10); }
+  });
+
+  // ---------- Helpers ----------
+  function fmt(sec) {
+    const s = Math.max(0, Math.ceil(sec));
+    return Math.floor(s / 60) + ':' + pad(s % 60);
+  }
+  const fmtInit = (v) => (v === null || v === undefined) ? '–' : v;
+  function maxFor(c) { return c.faction === 'player' ? tuning.maxCap : tuning.monsterStatic; }
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  function sortActiveInitiativeQueue() {
+    roster.sort((a, b) => {
+      if (a.init == null && b.init == null) return 0;
+      if (a.init == null) return 1;
+      if (b.init == null) return -1;
+      return b.init - a.init;
+    });
+  }
+  function resortKeepingActive() {
+    const activeId = roster[currentIndex] ? roster[currentIndex].id : null;
+    sortActiveInitiativeQueue();
+    const i = roster.findIndex(c => c.id === activeId);
+    currentIndex = i === -1 ? 0 : i;
+  }
+
+  // ---------- Turn bookkeeping ----------
+  function beginTurn() {
+    if (!combatStarted || roster.length === 0) return;
+    const a = roster[currentIndex];
+    turnOpen = true;
+    turnElapsed = 0;
+    logEvent('turn_start', Object.assign(snap(a), {
+      round, clockSeconds: r1(a.timeBank), conditions: a.conditions.slice(), bloodied: a.bloodied
+    }));
+  }
+  function endTurn(reason) {
+    if (!turnOpen || roster.length === 0) return;
+    const a = roster[currentIndex];
+    turnOpen = false;
+    logEvent('turn_end', Object.assign(snap(a), {
+      round, reason, secondsOnClock: r1(turnElapsed), clockRemaining: r1(a.timeBank)
+    }));
+  }
+
+  // ---------- Rendering ----------
+  function syncLayoutViews() {
+    const stage = $('stage');
+    $('roundNum').textContent = round;
+    $('queueTitle').textContent = `Encounter ${encounterNo}`;
+
+    if (roster.length === 0) {
+      stage.className = 'stage is-empty';
+      $('factionTag').innerHTML = '&nbsp;';
+      $('currentName').textContent = 'No combatants yet';
+      $('currentInit').textContent = '–';
+      $('clockLabel').textContent = 'Open setup to add combatants';
+      $('timerDisplay').textContent = '0:00';
+      $('progressBar').style.transform = 'scaleX(0)';
+      $('clockNote').innerHTML = '&nbsp;';
+      $('nextName').textContent = '–';
+      $('bloodiedBtn').hidden = true;
+      $('rulesSummary').replaceChildren(el('p', 'rules-empty', 'No one is selected.'));
+      rebuildRosterListsDOM();
+      return;
+    }
+
+    const active = roster[currentIndex];
+    const isPlayer = active.faction === 'player';
+
+    stage.className = 'stage ' + (isPlayer ? 'is-player' : 'is-monster');
+    if (!isPlayer && active.bloodied) stage.classList.add('is-bloodied');
+
+    $('factionTag').textContent = isPlayer ? 'Player' : 'Monster';
+    $('currentName').textContent = active.name;
+    $('currentName').title = active.name;
+    $('currentInit').textContent = fmtInit(active.init);
+
+    $('clockLabel').textContent = isPlayer ? 'Time bank' : 'Monster turn clock';
+    $('clockNote').textContent = isPlayer
+      ? `Ending the turn adds ${tuning.lapRefill} s, up to ${tuning.maxCap} s.`
+      : `Resets to ${tuning.monsterStatic} s every monster turn.`;
+
+    const bBtn = $('bloodiedBtn');
+    bBtn.hidden = isPlayer;
+    bBtn.textContent = active.bloodied ? 'Clear bloodied' : 'Mark bloodied';
+
+    $('nextName').textContent = roster.length > 1 ? roster[(currentIndex + 1) % roster.length].name : '–';
+
+    rebuildRosterListsDOM();
+    processMetricsRendering();
+    compileRulesSummaryText();
+  }
+
+  function processMetricsRendering() {
+    if (roster.length === 0) return;
+    const active = roster[currentIndex];
+    const pct = Math.max(0, Math.min(1, active.timeBank / maxFor(active)));
+
+    $('timerDisplay').textContent = fmt(active.timeBank);
+    $('progressBar').style.transform = `scaleX(${pct})`;
+
+    const stage = $('stage');
+    stage.classList.remove('warn-pulse', 'warn-rapid', 'warn-solid', 'warn-static');
+
+    if (active.faction === 'player') {
+      if (isPaused) {
+        if (active.timeBank <= 10) stage.classList.add('warn-static');
+      } else if (active.timeBank <= 5) {
+        stage.classList.add('warn-solid');
+      } else if (active.timeBank <= 10) {
+        stage.classList.add('warn-rapid');
+      } else if (active.timeBank <= 30 && active.timeBank >= 28) {
+        stage.classList.add('warn-pulse');
+      }
+      const mini = document.querySelector(`[data-bank="${active.id}"]`);
+      if (mini) {
+        mini.firstChild.style.transform = `scaleX(${pct})`;
+        mini.nextSibling.textContent = fmt(active.timeBank);
+      }
+    }
+  }
+
+  const TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>';
+
+  function rebuildRosterListsDOM() {
+    schedulePublish();
+    const q = $('queueList');
+    const s = $('rosterList');
+    q.replaceChildren();
+    s.replaceChildren();
+
+    $('rosterCount').textContent = roster.length === 1 ? '1 combatant' : `${roster.length} combatants`;
+    updateInitPrompt();
+
+    if (roster.length === 0) {
+      q.appendChild(el('li', 'queue-empty', 'The turn order fills in as you add combatants in setup.'));
+      s.appendChild(el('li', 's-empty', 'Add combatants on the left. They sort by initiative automatically.'));
+      return;
+    }
+
+    roster.forEach((c, index) => {
+      const isActive = combatStarted && index === currentIndex;
+      const faction = c.faction === 'player' ? 'is-player' : 'is-monster';
+
+      // Sidebar row
+      const li = el('li', `q-item ${faction}${isActive ? ' active' : ''}`);
+      if (isActive) li.setAttribute('aria-current', 'step');
+      const qi = el('button', 'q-init', fmtInit(c.init));
+      qi.title = `Change initiative for ${c.name}`;
+      qi.onclick = (e) => { e.stopPropagation(); openInitPad([c.id]); };
+      li.appendChild(qi);
+      const body = el('div');
+      body.appendChild(el('div', 'q-name', c.name));
+      const meta = el('div', 'q-meta');
+      if (c.faction === 'player') {
+        const bank = el('div', 'q-bank');
+        bank.dataset.bank = c.id;
+        const fill = el('span');
+        fill.style.transform = `scaleX(${Math.max(0, Math.min(1, c.timeBank / tuning.maxCap))})`;
+        bank.appendChild(fill);
+        meta.appendChild(bank);
+        meta.appendChild(el('span', 'q-bank-num', fmt(c.timeBank)));
+      } else {
+        meta.appendChild(el('span', null, 'Monster'));
+      }
+      body.appendChild(meta);
+      if (c.bloodied || c.conditions.length) {
+        const chips = el('div', 'chips');
+        if (c.bloodied && c.faction === 'monster') chips.appendChild(el('span', 'chip bloodied', 'Bloodied'));
+        c.conditions.forEach(cond => chips.appendChild(el('span', 'chip', cond)));
+        body.appendChild(chips);
+      }
+      li.appendChild(body);
+      const trash = el('button', 'q-remove');
+      trash.setAttribute('aria-label', `Remove ${c.name} from initiative`);
+      trash.title = `Remove ${c.name}`;
+      trash.innerHTML = TRASH_SVG;
+      trash.onclick = (e) => { e.stopPropagation(); removeTargetFromRoster(c.id); };
+      li.appendChild(trash);
+      q.appendChild(li);
+
+      // Setup row, with editable initiative
+      const row = el('li', `s-item ${faction}`);
+      const ib = el('button', 's-init-btn' + (c.init == null ? ' needs' : ''), c.init == null ? 'Roll' : c.init);
+      ib.setAttribute('aria-label', `Initiative for ${c.name}`);
+      ib.onclick = () => {
+        if (c.init == null) {
+          // Start with this one, then carry on through anyone else still missing a roll
+          const rest = roster.filter(x => x.init == null && x.id !== c.id).map(x => x.id);
+          openInitPad([c.id].concat(rest));
+        } else {
+          openInitPad([c.id]);
+        }
+      };
+      row.appendChild(ib);
+      const nameSpan = el('span', 's-name', c.name);
+      row.appendChild(nameSpan);
+      row.appendChild(el('span', 's-faction', c.faction === 'player' ? 'Player' : 'Monster'));
+      const ed = el('button', 's-edit', 'Edit');
+      ed.setAttribute('aria-label', `Edit name for ${c.name}`);
+      ed.onclick = () => startEditName(c, nameSpan, ed);
+      row.appendChild(ed);
+      const rm = el('button', 's-remove', 'Remove');
+      rm.setAttribute('aria-label', `Remove ${c.name}`);
+      rm.onclick = () => removeTargetFromRoster(c.id);
+      row.appendChild(rm);
+      s.appendChild(row);
+    });
+  }
+
+  function startEditName(c, nameSpan, btn) {
+    const inp = el('input', 's-name-input');
+    inp.type = 'text';
+    inp.value = c.name;
+    inp.maxLength = 60;
+    inp.setAttribute('aria-label', `Name for ${c.name}`);
+    nameSpan.replaceWith(inp);
+    btn.textContent = 'Save';
+    btn.classList.add('saving');
+    inp.focus();
+    inp.select();
+
+    let done = false;
+    const finish = (save) => {
+      if (done) return;
+      done = true;
+      const next = inp.value.trim();
+      if (save && next && next !== c.name) {
+        const previousName = c.name;
+        c.name = next;
+        logEvent('combatant_renamed', Object.assign(snap(c), { previousName }));
+      }
+      syncLayoutViews();
+    };
+    // Save button: mousedown fires before the input blurs, so handle it there
+    btn.onmousedown = (e) => { e.preventDefault(); finish(true); };
+    btn.onclick = () => finish(true);
+    inp.addEventListener('keydown', (e) => {
+      e.stopPropagation();   // keep Enter/Esc from reaching the setup shortcuts
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    inp.addEventListener('blur', () => finish(true));
+  }
+
+  function updateInitPrompt() {
+    const p = $('initPrompt');
+    const missing = roster.filter(c => c.init == null).length;
+    const lb = $('launchBtn');
+    p.classList.toggle('needs', missing > 0);
+    if (!combatStarted) {
+      lb.disabled = roster.length === 0;
+      lb.textContent = missing ? `Enter ${missing} ${missing === 1 ? 'roll' : 'rolls'}` : 'Start combat';
+      if (roster.length === 0) p.textContent = 'Add at least one combatant to start.';
+      else if (missing) p.textContent = `Enter initiative for ${missing} ${missing === 1 ? 'combatant' : 'combatants'} to start.`;
+      else p.textContent = 'Everyone has rolled. Ready to start.';
+    } else {
+      p.textContent = missing
+        ? `${missing} without initiative will act last until you enter a roll.`
+        : 'Tap a roll to change it. The order re-sorts.';
+    }
+  }
+
+  function setInitiative(id, value) {
+    const c = roster.find(x => x.id === id);
+    if (!c || value === c.init) return;
+    c.init = value;
+    logEvent('initiative_set', snap(c));
+    resortKeepingActive();
+    syncLayoutViews();
+  }
+
+  // ---------- Initiative pad ----------
+  let padQueue = [];
+  let padTotal = 0;
+  let padBuffer = '';
+  let padNeg = false;
+  let padFresh = false;      // showing an existing value; the first digit replaces it
+  let padWasRunning = false;
+  let padReturnFocus = null;
+
+  function openInitPad(ids, returnFocus) {
+    padQueue = ids.filter(id => roster.some(c => c.id === id));
+    if (!padQueue.length) return;
+    padTotal = padQueue.length;
+    padWasRunning = combatStarted && !isPaused;
+    if (padWasRunning) setPaused(true);
+    padReturnFocus = returnFocus || null;
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    showPadFor();
+    $('initModal').classList.add('open');
+  }
+
+  function openInitPadForActive() {
+    if (roster.length) openInitPad([roster[currentIndex].id]);
+  }
+
+  function showPadFor() {
+    const c = roster.find(x => x.id === padQueue[0]);
+    if (!c) { advancePad(); return; }
+    padBuffer = c.init == null ? '' : String(Math.abs(c.init));
+    padNeg = c.init != null && c.init < 0;
+    padFresh = c.init != null;
+    $('padCard').className = 'modal-card pad-card ' + (c.faction === 'player' ? 'is-player' : 'is-monster');
+    $('padFaction').textContent = c.faction === 'player' ? 'Player' : 'Monster';
+    $('padTitle').textContent = c.name;
+    $('padTitle').title = c.name;
+    const done = padTotal - padQueue.length;
+    $('padProgress').textContent = padTotal > 1 ? `${done + 1} of ${padTotal}` : (c.init == null ? 'Enter the initiative roll' : 'Change the initiative roll');
+    $('padSet').textContent = padQueue.length > 1 ? 'Set and next' : 'Set initiative';
+    $('padSkip').textContent = padQueue.length > 1 ? 'Skip' : 'Cancel';
+    renderPad();
+  }
+
+  function renderPad() {
+    const d = $('padDisplay');
+    d.textContent = padBuffer === '' ? '–' : (padNeg ? '−' : '') + padBuffer;
+    d.classList.toggle('empty', padBuffer === '');
+    d.classList.toggle('fresh', padFresh && padBuffer !== '');
+    $('padSet').disabled = padBuffer === '';
+  }
+
+  function flashPadKey(k) {
+    const b = document.querySelector(`.pad-key[data-key="${k}"]`);
+    if (!b) return;
+    b.classList.add('hit');
+    setTimeout(() => b.classList.remove('hit'), 120);
+  }
+
+  function padPress(k) {
+    flashPadKey(k);
+    if (/^[0-9]$/.test(k)) {
+      if (padFresh) { padBuffer = ''; padNeg = false; padFresh = false; }
+      if (padBuffer === '0') padBuffer = '';
+      if (padBuffer.length < 3) padBuffer += k;
+    } else if (k === 'back') {
+      padFresh = false;
+      padBuffer = padBuffer.slice(0, -1);
+      if (padBuffer === '') padNeg = false;
+    } else if (k === 'clear') {
+      padFresh = false;
+      padBuffer = '';
+      padNeg = false;
+    } else if (k === 'neg') {
+      padFresh = false;
+      padNeg = !padNeg;
+    }
+    renderPad();
+  }
+
+  function commitInitPad() {
+    if (padBuffer === '') return;
+    setInitiative(padQueue[0], parseInt(padBuffer, 10) * (padNeg ? -1 : 1));
+    advancePad();
+  }
+  function skipInitPad() {
+    if (padQueue.length > 1) advancePad();
+    else closeInitPad();
+  }
+  function advancePad() {
+    padQueue.shift();
+    if (padQueue.length) showPadFor();
+    else closeInitPad();
+  }
+
+  function closeInitPad() {
+    $('initModal').classList.remove('open');
+    padQueue = [];
+    if (padWasRunning) forceActiveTimerResume();
+    padWasRunning = false;
+    if (padReturnFocus && padReturnFocus.isConnected) {
+      padReturnFocus.focus();
+    } else if ($('setup').classList.contains('open') && !combatStarted && roster.length && roster.every(c => c.init != null)) {
+      $('launchBtn').focus();   // Enter now starts combat
+    }
+    padReturnFocus = null;
+  }
+
+  document.querySelectorAll('.pad-key').forEach(b => {
+    b.addEventListener('click', () => padPress(b.dataset.key));
+  });
+  $('initModal').addEventListener('click', (e) => { if (e.target === $('initModal')) closeInitPad(); });
+
+  function handlePadKey(e) {
+    let k = null;
+    if (/^[0-9]$/.test(e.key)) k = e.key;
+    else if (/^Numpad[0-9]$/.test(e.code)) k = e.code.slice(6);   // numpad with Num Lock off
+    else if (e.key === 'Backspace') k = 'back';
+    else if (e.key === 'Delete' || e.code === 'NumpadDecimal') k = 'clear';
+    else if (e.key === '-' || e.code === 'NumpadSubtract') k = 'neg';
+
+    if (k !== null) { e.preventDefault(); padPress(k); return; }
+    if (e.key === 'Enter' || e.code === 'NumpadEnter') { e.preventDefault(); commitInitPad(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); closeInitPad(); return; }
+    if (e.key === 'Tab') { e.preventDefault(); skipInitPad(); return; }
+    // Swallow everything else so combat shortcuts don't fire behind the pad
+    if (e.code === 'Space' || e.key.startsWith('Arrow')) e.preventDefault();
+  }
+
+  function compileRulesSummaryText() {
+    const box = $('rulesSummary');
+    box.replaceChildren();
+    if (roster.length === 0) return;
+    const active = roster[currentIndex];
+    if (active.conditions.length === 0) {
+      box.appendChild(el('p', 'rules-empty', 'None. Use Edit conditions to add one.'));
+      return;
+    }
+    active.conditions.forEach(c => {
+      const r = el('div', 'rule');
+      r.appendChild(el('strong', null, c));
+      r.appendChild(el('p', null, conditionRules[c]));
+      box.appendChild(r);
+    });
+  }
+
+  // ---------- Clock ----------
+  function trackingProcessTick(timestamp) {
+    if (!lastTimestamp) lastTimestamp = timestamp;
+    const delta = (timestamp - lastTimestamp) / 1000;
+    lastTimestamp = timestamp;
+
+    if (!isPaused && roster.length > 0) {
+      const active = roster[currentIndex];
+      active.timeBank -= delta;
+      turnElapsed += delta;
+      if (active.timeBank <= 0) {
+        turnElapsed += active.timeBank; // don't count overshoot
+        active.timeBank = 0;
+        setPaused(true);
+        logEvent('timeout', snap(active));
+        executeDodgeSequence();
+      }
+      processMetricsRendering();
+    }
+    requestAnimationFrame(trackingProcessTick);
+  }
+  requestAnimationFrame(trackingProcessTick);
+
+  function setPaused(p) {
+    isPaused = p;
+    const wrap = $('workspace');
+    wrap.classList.toggle('paused', p);
+    wrap.classList.toggle('running', !p);
+    $('pauseBtn').textContent = p ? 'Resume' : 'Pause';
+    $('statusPill').textContent = p ? 'Paused' : 'Running';
+    processMetricsRendering();
+    schedulePublish();
+  }
+
+  function togglePauseState() {
+    if (roster.length === 0 || !combatStarted) return;
+    setPaused(!isPaused);
+    const a = roster[currentIndex];
+    logEvent(isPaused ? 'paused' : 'resumed', Object.assign(snap(a), { clockSeconds: r1(a.timeBank) }));
+  }
+  function forceActiveTimerResume() { if (roster.length && combatStarted) setPaused(false); }
+
+  function manualTimeAdjust(amount) {
+    if (roster.length === 0 || !combatStarted) return;
+    const active = roster[currentIndex];
+    const before = active.timeBank;
+    active.timeBank = Math.max(0, Math.min(maxFor(active), active.timeBank + amount));
+    if (active.timeBank !== before) {
+      logEvent('time_adjusted', Object.assign(snap(active), { amount, clockSeconds: r1(active.timeBank) }));
+    }
+    processMetricsRendering();
+    schedulePublish();
+  }
+
+  function toggleBloodiedState() {
+    if (roster.length === 0) return;
+    const active = roster[currentIndex];
+    if (active.faction === 'monster') {
+      active.bloodied = !active.bloodied;
+      logEvent(active.bloodied ? 'bloodied_marked' : 'bloodied_cleared', Object.assign(snap(active), { round }));
+      syncLayoutViews();
+    }
+  }
+
+  function cancelDodge() {
+    if (dodgeTimeoutId) { clearTimeout(dodgeTimeoutId); dodgeTimeoutId = null; }
+    $('dodgeOverlay').classList.remove('open');
+    schedulePublish();
+  }
+
+  function nextTurn(reason) {
+    if (roster.length === 0 || !combatStarted) return;
+    cancelDodge();
+    endTurn(typeof reason === 'string' ? reason : 'next');
+    const active = roster[currentIndex];
+    if (active.faction === 'player') {
+      active.timeBank = Math.min(tuning.maxCap, active.timeBank + tuning.lapRefill);
+    }
+    currentIndex = (currentIndex + 1) % roster.length;
+    if (currentIndex === 0) { round++; logEvent('round_start', { round }); }
+    resetTurnTimerMetrics();
+    syncLayoutViews();
+    beginTurn();
+    forceActiveTimerResume();
+  }
+
+  function prevTurn() {
+    if (roster.length === 0 || !combatStarted) return;
+    cancelDodge();
+    endTurn('previous');
+    if (currentIndex === 0) round = Math.max(1, round - 1);
+    currentIndex = (currentIndex - 1 + roster.length) % roster.length;
+    resetTurnTimerMetrics();
+    syncLayoutViews();
+    beginTurn();
+    forceActiveTimerResume();
+  }
+
+  function resetTurnTimerMetrics() {
+    const active = roster[currentIndex];
+    if (!active) return;
+    if (active.faction === 'monster') active.timeBank = tuning.monsterStatic;
+    else if (active.timeBank <= 0) active.timeBank = tuning.startBank;
+  }
+
+  function executeDodgeSequence() {
+    fireBuzzerAudioContext();
+    $('dodgeOverlay').classList.add('open');
+    schedulePublish();
+    if (dodgeTimeoutId) clearTimeout(dodgeTimeoutId);
+    dodgeTimeoutId = setTimeout(() => {
+      dodgeTimeoutId = null;
+      $('dodgeOverlay').classList.remove('open');
+      nextTurn('timeout');
+    }, 3000);
+  }
+
+  // ---------- Conditions ----------
+  (function buildConditionGrid() {
+    const grid = $('condGrid');
+    Object.keys(conditionRules).forEach(name => {
+      const b = el('button', 'cond-toggle', name);
+      b.dataset.cond = name;
+      b.setAttribute('aria-pressed', 'false');
+      b.onclick = () => toggleCombatantCondition(name);
+      grid.appendChild(b);
+    });
+  })();
+
+  function openConditionsModal() {
+    if (roster.length === 0) return;
+    $('condTitle').textContent = `Conditions for ${roster[currentIndex].name}`;
+    modalWasRunning = !isPaused;
+    if (!isPaused) setPaused(true);
+    refreshConditionTogglesDOM();
+    $('conditionsModal').classList.add('open');
+  }
+
+  function closeConditionsModal() {
+    $('conditionsModal').classList.remove('open');
+    if (modalWasRunning) forceActiveTimerResume();
+  }
+
+  function toggleCombatantCondition(name) {
+    if (roster.length === 0) return;
+    const active = roster[currentIndex];
+    const i = active.conditions.indexOf(name);
+    if (i > -1) active.conditions.splice(i, 1);
+    else active.conditions.push(name);
+    logEvent(i > -1 ? 'condition_removed' : 'condition_added', Object.assign(snap(active), { condition: name, round }));
+    refreshConditionTogglesDOM();
+    compileRulesSummaryText();
+    rebuildRosterListsDOM();
+    processMetricsRendering();
+  }
+
+  function refreshConditionTogglesDOM() {
+    if (roster.length === 0) return;
+    const active = roster[currentIndex];
+    document.querySelectorAll('.cond-toggle').forEach(b => {
+      const on = active.conditions.includes(b.dataset.cond);
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on);
+    });
+  }
+
+  // ---------- Setup ----------
+  function readTuning() {
+    tuning.startBank = parseFloat($('cfgStartBank').value) || 90;
+    tuning.lapRefill = parseFloat($('cfgLapRefill').value) || 0;
+    tuning.maxCap = parseFloat($('cfgMaxCap').value) || 120;
+    tuning.monsterStatic = parseFloat($('cfgMonster').value) || 30;
+  }
+
+  function refreshSetupChrome() {
+    $('setupTitle').textContent = `Encounter ${encounterNo} setup`;
+    $('newEncBtn').hidden = !combatStarted;
+    $('launchBtn').hidden = combatStarted;
+    $('backBtn').hidden = !combatStarted;
+    if ($('newEncBtn').disarm) $('newEncBtn').disarm();
+  }
+
+  function openSetup() {
+    if (!isPaused) setPaused(true);
+    refreshSetupChrome();
+    rebuildRosterListsDOM();
+    $('setup').classList.add('open');
+  }
+
+  function closeSetup() {
+    readTuning();
+    $('setup').classList.remove('open');
+    syncLayoutViews();
+  }
+
+  function launchCombatTrackerMode() {
+    readTuning();
+    if (roster.length === 0 || roster.some(c => c.init == null)) {
+      updateInitPrompt();
+      openInitPad(roster.filter(c => c.init == null).map(c => c.id));
+      return;
+    }
+    sortActiveInitiativeQueue();
+    currentIndex = 0;
+    round = 1;
+    combatStarted = true;
+    logEvent('encounter_start', {
+      settings: Object.assign({}, tuning),
+      roster: roster.map(c => Object.assign(snap(c), { clockSeconds: r1(c.timeBank) }))
+    });
+    resetTurnTimerMetrics();
+    $('setup').classList.remove('open');
+    syncLayoutViews();
+    beginTurn();
+    forceActiveTimerResume();
+  }
+
+  function startNewEncounter() {
+    readTuning();
+    cancelDodge();
+    endTurn('encounter_end');
+    logEvent('encounter_end', { reason: 'new_encounter', rounds: round });
+    encounterNo++;
+
+    const monsters = roster.filter(c => c.faction === 'monster').length;
+    roster = roster.filter(c => c.faction === 'player');
+    roster.forEach(c => {
+      c.init = null;
+      c.conditions = [];
+      c.bloodied = false;
+      c.timeBank = tuning.startBank;
+    });
+    combatStarted = false;
+    round = 1;
+    currentIndex = 0;
+    setPaused(true);
+    logEvent('new_encounter_prepared', { monstersCleared: monsters, carriedOver: roster.map(snap) });
+
+    refreshSetupChrome();
+    syncLayoutViews();
+    if (roster.length) openInitPad(roster.map(c => c.id));
+    else $('newName').focus();
+  }
+
+  function executeReinforcementInsertion() {
+    readTuning();
+    const nameField = $('newName');
+    const faction = $('newFaction').value;
+
+    const c = {
+      id: nextId++,
+      name: nameField.value.trim() || 'Combatant ' + (roster.length + 1),
+      init: null,
+      faction,
+      timeBank: faction === 'player' ? tuning.startBank : tuning.monsterStatic,
+      conditions: [],
+      bloodied: false
+    };
+    roster.push(c);
+    logEvent('combatant_added', Object.assign(snap(c), { duringCombat: combatStarted, round: combatStarted ? round : null }));
+    nameField.value = '';
+    resortKeepingActive();
+    syncLayoutViews();
+    openInitPad([c.id], nameField);
+  }
+
+  function removeTargetFromRoster(id) {
+    const idx = roster.findIndex(c => c.id === id);
+    if (idx === -1) return;
+    const c = roster[idx];
+    const wasActive = combatStarted && idx === currentIndex;
+    if (wasActive) { cancelDodge(); endTurn('removed'); }
+    logEvent('combatant_removed', Object.assign(snap(c), { round: combatStarted ? round : null }));
+
+    const activeId = roster[currentIndex] ? roster[currentIndex].id : null;
+    roster.splice(idx, 1);
+
+    if (roster.length === 0) {
+      if (combatStarted) {
+        logEvent('encounter_end', { reason: 'roster_cleared', rounds: round });
+        encounterNo++;
+      }
+      combatStarted = false;
+      round = 1;
+      currentIndex = 0;
+      setPaused(true);
+      refreshSetupChrome();
+    } else if (wasActive) {
+      // The next combatant in line takes the turn
+      if (idx >= roster.length) { currentIndex = 0; round++; logEvent('round_start', { round }); }
+      else currentIndex = idx;
+      resetTurnTimerMetrics();
+    } else {
+      currentIndex = Math.max(0, roster.findIndex(x => x.id === activeId));
+    }
+
+    syncLayoutViews();
+    if (wasActive && combatStarted && roster.length) beginTurn();
+  }
+
+  armable($('newEncBtn'), 'Tap again: clear monsters and rolls', startNewEncounter);
+  armable($('clearLogBtn'), 'Tap again to clear the log', startNewLog);
+
+  // ---------- Live display sync ----------
+  // Sends the tracker state through a public MQTT relay so display.html can mirror it on other screens.
+  var RELAYS = {
+    hivemq: { label: 'HiveMQ public relay', url: 'wss://broker.hivemq.com:8884/mqtt' },
+    emqx: { label: 'EMQX public relay', url: 'wss://broker.emqx.io:8084/mqtt' }
+  };
+  var LIVE_KEY = 'encounterTracker.live.v1';
+  var ROOM_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  var live = { enabled: false, room: null, relay: 'hivemq', client: null, status: 'off', viewers: new Set(), seq: 0, pending: null };
+
+  function randomRoom() {
+    const a = new Uint32Array(6);
+    crypto.getRandomValues(a);
+    return Array.from(a, n => ROOM_ALPHABET[n % ROOM_ALPHABET.length]).join('');
+  }
+  function liveBase() { return `encounter-tracker-live/v1/${live.room}`; }
+  function relayUrl() { return RELAYS[live.relay] ? RELAYS[live.relay].url : live.relay; }
+  function saveLivePrefs() {
+    try { localStorage.setItem(LIVE_KEY, JSON.stringify({ enabled: live.enabled, room: live.room, relay: live.relay })); } catch (e) { /* ignore */ }
+  }
+  function displayLink() {
+    const u = new URL('display.html', location.href);
+    u.search = '';
+    u.hash = '';
+    u.searchParams.set('room', live.room);
+    if (live.relay !== 'hivemq') u.searchParams.set('relay', live.relay);
+    return u.toString();
+  }
+
+  function buildLiveState() {
+    const active = roster[currentIndex];
+    return {
+      v: 1,
+      seq: ++live.seq,
+      encounter: encounterNo,
+      round,
+      combatStarted,
+      paused: isPaused,
+      timeout: $('dodgeOverlay').classList.contains('open'),
+      tuning: Object.assign({}, tuning),
+      activeId: combatStarted && active ? active.id : null,
+      roster: roster.map(c => ({
+        id: c.id, name: c.name, faction: c.faction, init: c.init,
+        bank: Math.round(c.timeBank * 100) / 100,
+        conditions: c.conditions.slice(), bloodied: c.bloodied
+      }))
+    };
+  }
+
+  function publishStateNow() {
+    if (!live.client || !live.client.connected) return;
+    live.client.publish(`${liveBase()}/state`, JSON.stringify(buildLiveState()), { qos: 0, retain: true });
+  }
+  function schedulePublish() {
+    if (!live || !live.enabled || live.pending) return;
+    live.pending = setTimeout(() => { live.pending = null; publishStateNow(); }, 120);
+  }
+  // While the clock runs, send a heartbeat so late joiners and drifting screens stay within a second.
+  setInterval(() => { if (live.enabled && combatStarted && !isPaused) publishStateNow(); }, 1000);
+
+  function setLiveStatus(status) {
+    live.status = status;
+    if (status !== 'live') live.viewers.clear();
+    updateLiveUI();
+  }
+
+  function liveConnect() {
+    liveDisconnect(false);
+    if (typeof mqtt === 'undefined') { setLiveStatus('nolib'); return; }
+    setLiveStatus('connecting');
+    const statusTopic = `${liveBase()}/status`;
+    let client;
+    try {
+      client = mqtt.connect(relayUrl(), {
+        clientId: 'et-ctl-' + randomRoom().toLowerCase() + Date.now().toString(36),
+        clean: true,
+        keepalive: 30,
+        reconnectPeriod: 3000,
+        connectTimeout: 10000,
+        will: { topic: statusTopic, payload: 'offline', qos: 0, retain: true }
+      });
+    } catch (e) {
+      setLiveStatus('error');
+      return;
+    }
+    live.client = client;
+    client.on('connect', () => {
+      client.publish(statusTopic, 'online', { qos: 0, retain: true });
+      client.subscribe(`${liveBase()}/viewers/+`);
+      live.viewers.clear();
+      setLiveStatus('live');
+      publishStateNow();
+    });
+    client.on('reconnect', () => setLiveStatus('connecting'));
+    client.on('offline', () => setLiveStatus('offline'));
+    client.on('error', () => setLiveStatus('error'));
+    client.on('message', (topic, payload) => {
+      const id = topic.split('/').pop();
+      if (payload && payload.length) live.viewers.add(id);
+      else live.viewers.delete(id);
+      updateLiveUI();
+    });
+  }
+
+  function liveDisconnect(announce) {
+    const c = live.client;
+    live.client = null;
+    if (!c) return;
+    if (announce && c.connected) {
+      c.publish(`${liveBase()}/status`, 'offline', { qos: 0, retain: true });
+      c.publish(`${liveBase()}/state`, '', { qos: 0, retain: true });  // clear the retained state
+    }
+    c.end(false);
+  }
+
+  function setLiveEnabled(on) {
+    live.enabled = on;
+    saveLivePrefs();
+    if (on) liveConnect();
+    else { liveDisconnect(true); setLiveStatus('off'); }
+    logEvent(on ? 'live_display_on' : 'live_display_off', { room: live.room });
+  }
+
+  function changeRelay(value) {
+    live.relay = value;
+    saveLivePrefs();
+    $('relayCustomWrap').hidden = !!RELAYS[value];
+    if (live.enabled && RELAYS[value]) liveConnect();
+    updateLiveUI();
+  }
+
+  function newRoomCode() {
+    const wasOn = live.enabled;
+    if (wasOn) liveDisconnect(true);
+    live.room = randomRoom();
+    saveLivePrefs();
+    if (wasOn) liveConnect();
+    updateLiveUI();
+    toast(`New room code: ${live.room}`);
+  }
+
+  const LIVE_TEXT = {
+    off: 'Live display off',
+    connecting: 'Connecting to relay',
+    live: 'Live',
+    offline: 'Relay offline, retrying',
+    error: 'Can\u2019t reach the relay',
+    nolib: 'Sync library didn\u2019t load'
+  };
+
+  function updateLiveUI() {
+    const s = live.status;
+    const n = live.viewers.size;
+    const viewersText = n === 0 ? 'no screens watching' : n === 1 ? '1 screen watching' : `${n} screens watching`;
+    const text = s === 'live' ? `Live, ${viewersText}` : LIVE_TEXT[s];
+
+    const badge = $('liveBadge');
+    if (!badge) return;
+    badge.dataset.state = s;
+    $('liveBadgeText').textContent = s === 'live' ? `Live: ${live.room}, ${n} watching` : LIVE_TEXT[s];
+
+    $('liveSetupStatus').textContent = s === 'off' ? 'Off. Share the turn order and timer with other screens.' : `${text}. Room ${live.room}.`;
+    $('liveSetupStatus').dataset.state = s;
+
+    $('liveModalStatus').textContent = text;
+    $('liveModalStatus').dataset.state = s;
+    $('liveToggle').textContent = live.enabled ? 'Stop sharing' : 'Go live';
+    $('liveToggle').className = live.enabled ? 'btn btn-danger' : 'btn btn-primary btn-big';
+    $('liveShare').hidden = !live.enabled;
+    $('liveRoom').textContent = live.room;
+    const link = displayLink();
+    $('liveLink').textContent = link;
+    $('liveLink').href = link;
+
+    const sel = $('relaySelect');
+    const isPreset = !!RELAYS[live.relay];
+    if (document.activeElement !== sel) sel.value = isPreset ? live.relay : 'custom';
+    $('relayCustomWrap').hidden = isPreset && sel.value !== 'custom';
+    if (!isPreset && document.activeElement !== $('relayCustom')) $('relayCustom').value = live.relay;
+
+    renderQr(link);
+  }
+
+  let lastQr = '';
+  function renderQr(text) {
+    const box = $('liveQr');
+    if (text === lastQr || !box) return;
+    lastQr = text;
+    if (typeof qrcode === 'undefined') { box.replaceChildren(el('p', 'panel-text', 'QR code unavailable. Use the link.')); return; }
+    try {
+      const q = qrcode(0, 'M');
+      q.addData(text);
+      q.make();
+      box.innerHTML = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+    } catch (e) {
+      box.replaceChildren(el('p', 'panel-text', 'QR code unavailable. Use the link.'));
+    }
+  }
+
+  let liveModalWasRunning = false;
+  function openLiveModal() {
+    liveModalWasRunning = combatStarted && !isPaused;
+    updateLiveUI();
+    $('liveModal').classList.add('open');
+  }
+  function closeLiveModal() {
+    $('liveModal').classList.remove('open');
+  }
+
+  async function copyDisplayLink() {
+    const link = displayLink();
+    try {
+      await navigator.clipboard.writeText(link);
+      toast('Display link copied.');
+    } catch (e) {
+      const r = document.createRange();
+      r.selectNodeContents($('liveLink'));
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      toast('Link selected. Copy it with Ctrl or Cmd + C.');
+    }
+  }
+
+  (function initLive() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LIVE_KEY) || 'null');
+      if (saved) { live.room = saved.room; live.relay = saved.relay || 'hivemq'; live.enabled = !!saved.enabled; }
+    } catch (e) { /* ignore */ }
+    if (!live.room) live.room = randomRoom();
+    saveLivePrefs();
+
+    $('relaySelect').addEventListener('change', (e) => {
+      if (e.target.value === 'custom') { $('relayCustomWrap').hidden = false; $('relayCustom').focus(); }
+      else changeRelay(e.target.value);
+    });
+    $('relayCustom').addEventListener('change', (e) => {
+      const v = e.target.value.trim();
+      if (/^wss?:\/\//i.test(v)) changeRelay(v);
+      else if (v) toast('Relay addresses start with wss://');
+    });
+    $('liveModal').addEventListener('click', (e) => { if (e.target === $('liveModal')) closeLiveModal(); });
+    window.addEventListener('pagehide', () => {
+      if (live.client && live.client.connected) live.client.publish(`${liveBase()}/status`, 'offline', { qos: 0, retain: true });
+    });
+
+    if (live.enabled) liveConnect();
+    else setLiveStatus('off');
+  })();
+  armable($('newRoomBtn'), 'Tap again for a new code', newRoomCode);
+
+
+  refreshSetupChrome();
+  updateLogPanel();
+  syncLayoutViews();
+</script>
+</body>
+</html>
